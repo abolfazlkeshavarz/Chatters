@@ -49,7 +49,7 @@ func main() {
 			userID, _ := c.Get("user_id")
 			c.JSON(200, gin.H{"user_id": userID})
 		})
-		
+
 		protected.GET("/chats/:chatId/messages", handlers.GetMessages)
 		protected.POST("/chats", handlers.CreateChat)
 		protected.GET("/chats", handlers.GetChats)
@@ -58,7 +58,7 @@ func main() {
 		protected.PUT("/profile/password", handlers.ChangePassword)
 		protected.POST("/media", handlers.UploadMedia)
 		protected.GET("/media/:id", handlers.DownloadMedia)
-
+		// protected.GET("/chats/:id/members", handlers.GetChatMembers)
 
 	}
 

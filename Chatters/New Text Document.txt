@@ -1,0 +1,1309 @@
+
+Chatters dir
+
+
+
+Chatters/cmd/server/main.go:
+```
+package main
+
+import (
+	"messenger/internal/db"
+	"messenger/internal/handlers"
+	"messenger/internal/middleware"
+	"messenger/internal/websocket"
+
+	"github.com/gin-contrib/cors"
+	"github.com/gin-gonic/gin"
+)
+
+func main() {
+	db.Connect()
+
+	r := gin.Default()
+
+	// 🔧 Explicit OPTIONS handling (dev)
+	r.Use(func(c *gin.Context) {
+		if c.Request.Method == "OPTIONS" {
+			c.Header("Access-Control-Allow-Origin", "http://localhost:3000")
+			c.Header("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS")
+			c.Header("Access-Control-Allow-Headers", "Origin, Content-Type, Authorization")
+			c.AbortWithStatus(204)
+			return
+		}
+		c.Next()
+	})
+
+	// ✅ Dev CORS
+	r.Use(cors.Default())
+
+	// 🔓 Public routes
+	r.POST("/register", handlers.Register)
+	r.POST("/login", handlers.Login)
+
+	// 🔌 WebSocket hub
+	hub := websocket.NewHub()
+	go hub.Run()
+
+	// ✅ WebSocket route (NO middleware)
+	r.GET("/api/ws", websocket.HandleWebSocket(hub))
+
+	// 🔐 Protected REST routes
+	protected := r.Group("/api")
+	protected.Use(middleware.AuthMiddleware())
+	{
+		protected.GET("/me", func(c *gin.Context) {
+			userID, _ := c.Get("user_id")
+			c.JSON(200, gin.H{"user_id": userID})
+		})
+		
+		protected.GET("/chats/:chatId/messages", handlers.GetMessages)
+		protected.POST("/chats", handlers.CreateChat)
+		protected.GET("/chats", handlers.GetChats)
+		protected.POST("/chats/:id/members", handlers.AddMember)
+		protected.PUT("/profile/username", handlers.ChangeUsername)
+		protected.PUT("/profile/password", handlers.ChangePassword)
+		protected.POST("/media", handlers.UploadMedia)
+		protected.GET("/media/:id", handlers.DownloadMedia)
+
+
+	}
+
+	r.Run(":8080")
+}
+```
+
+Chatters/internal/auth/jwt.go:
+
+```
+package auth
+
+import (
+	"time"
+
+	"github.com/golang-jwt/jwt/v5"
+)
+
+var jwtSecret = []byte("CHANGE_THIS_SECRET")
+
+func GenerateToken(userID string) (string, error) {
+	claims := jwt.MapClaims{
+		"user_id": userID,
+		"exp":     time.Now().Add(72 * time.Hour).Unix(),
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString(jwtSecret)
+}
+
+func ValidateToken(tokenString string) (*jwt.Token, jwt.MapClaims, error) {
+	claims := jwt.MapClaims{}
+
+	token, err := jwt.ParseWithClaims(
+		tokenString,
+		claims,
+		func(token *jwt.Token) (interface{}, error) {
+			return jwtSecret, nil
+		},
+	)
+
+	return token, claims, err
+}
+```
+
+Chatters/internal/db/postgres.go:
+```
+package db
+
+import (
+	"database/sql"
+	"fmt"
+
+	_ "github.com/lib/pq"
+)
+
+var DB *sql.DB
+
+func Connect() error {
+	dsn := "postgres://postgres:admin@localhost:5432/messenger?sslmode=disable"
+
+	db, err := sql.Open("postgres", dsn)
+	if err != nil {
+		return fmt.Errorf("sql.Open error: %w", err)
+	}
+
+	if err := db.Ping(); err != nil {
+		return fmt.Errorf("db.Ping error: %w", err)
+	}
+
+	DB = db
+	return nil
+}
+```
+
+Chatters/internal/handlers/:
+
+auth.go:
+```
+package handlers
+
+import (
+	"messenger/internal/auth"
+	"messenger/internal/db"
+	"net/http"
+
+	"github.com/gin-gonic/gin"
+	"golang.org/x/crypto/bcrypt"
+)
+
+func Register(c *gin.Context) {
+	var req struct {
+		Username string `json:"username"`
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "invalid request"})
+		return
+	}
+
+	if req.Username == "" || req.Email == "" || req.Password == "" {
+		c.JSON(400, gin.H{"error": "all fields required"})
+		return
+	}
+
+	// 1️⃣ check email uniqueness
+	var emailExists bool
+	db.DB.QueryRow(
+		`SELECT EXISTS (SELECT 1 FROM users WHERE email = $1)`,
+		req.Email,
+	).Scan(&emailExists)
+
+	if emailExists {
+		c.JSON(400, gin.H{"error": "email already registered"})
+		return
+	}
+
+	// 2️⃣ check username uniqueness (NO AUTO POSTFIX)
+	var usernameExists bool
+	db.DB.QueryRow(
+		`SELECT EXISTS (SELECT 1 FROM users WHERE id = $1)`,
+		req.Username,
+	).Scan(&usernameExists)
+
+	if usernameExists {
+		c.JSON(400, gin.H{
+			"error": "username already taken, please choose another (add letters or numbers)",
+		})
+		return
+	}
+
+	// 3️⃣ hash password
+	hash, err := bcrypt.GenerateFromPassword(
+		[]byte(req.Password),
+		bcrypt.DefaultCost,
+	)
+	if err != nil {
+		c.JSON(500, gin.H{"error": "password error"})
+		return
+	}
+
+	// 4️⃣ insert user
+	_, err = db.DB.Exec(
+		`INSERT INTO users (id, email, password_hash)
+		 VALUES ($1, $2, $3)`,
+		req.Username, req.Email, string(hash),
+	)
+
+	if err != nil {
+		c.JSON(500, gin.H{"error": "failed to create user"})
+		return
+	}
+
+	c.JSON(200, gin.H{
+		"status":   "ok",
+		"username": req.Username,
+	})
+}
+
+func Login(c *gin.Context) {
+	var req struct {
+		Identifier string `json:"username"` // username OR email
+		Password   string `json:"password"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "invalid request"})
+		return
+	}
+
+	var userID string
+	var hash string
+
+	err := db.DB.QueryRow(
+		`SELECT id, password_hash
+		 FROM users
+		 WHERE id = $1 OR email = $1`,
+		req.Identifier,
+	).Scan(&userID, &hash)
+
+	if err != nil || bcrypt.CompareHashAndPassword([]byte(hash), []byte(req.Password)) != nil {
+		c.JSON(http.StatusUnauthorized, gin.H{"error": "invalid credentials"})
+		return
+	}
+
+	token, _ := auth.GenerateToken(userID)
+	c.JSON(http.StatusOK, gin.H{"token": token})
+}
+```
+
+
+chats.go:
+```
+package handlers
+
+import (
+	"net/http"
+	"database/sql"
+	"time"
+	"github.com/lib/pq"
+	"messenger/internal/db"
+	"github.com/gin-gonic/gin"
+)
+
+func CreateChat(c *gin.Context) {
+	creator := c.GetString("user_id")
+
+	var req struct {
+		Members []string `json:"members"`
+		IsGroup bool     `json:"is_group"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		println("DB ERROR:", err.Error())
+		c.JSON(400, gin.H{"error": "invalid request"})
+		return
+	}
+
+	if len(req.Members) < 1 {
+		c.JSON(400, gin.H{"error": "at least one member required"})
+		return
+	}
+
+	tx, err := db.DB.Begin()
+	if err != nil {
+		println("DB ERROR:", err.Error())
+		c.JSON(500, gin.H{"error": "db error"})
+		return
+	}
+	defer tx.Rollback()
+
+	// 1️⃣ Create chat
+	var chatID string
+	err = tx.QueryRow(
+		`INSERT INTO chats (is_group)
+		 VALUES ($1)
+		 RETURNING id`,
+		req.IsGroup,
+	).Scan(&chatID)
+	if err != nil {
+		println("DB ERROR:", err.Error())
+		c.JSON(500, gin.H{"error": "failed to create chat"})
+		return
+	}
+
+	// 2️⃣ Build UNIQUE member set
+	memberSet := map[string]bool{}
+	memberSet[creator] = true
+
+	for _, m := range req.Members {
+		memberSet[m] = true
+	}
+
+	// 3️⃣ Validate users & insert members
+	for user := range memberSet {
+
+		// check user exists
+		var exists bool
+		err = tx.QueryRow(
+			`SELECT EXISTS (SELECT 1 FROM users WHERE id = $1)`,
+			user,
+		).Scan(&exists)
+
+		if err != nil || !exists {
+			println("DB ERROR:", err.Error())
+			c.JSON(400, gin.H{"error": "user does not exist: " + user})
+			return
+		}
+
+		_, err = tx.Exec(
+			`INSERT INTO chat_members (chat_id, user_id)
+			 VALUES ($1, $2)`,
+			chatID, user,
+		)
+		if err != nil {
+			println("DB ERROR:", err.Error())
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+	}
+
+	// 4️⃣ Commit
+	if err = tx.Commit(); err != nil {
+		println("DB ERROR:", err.Error())
+		c.JSON(500, gin.H{"error": "commit failed"})
+		return
+	}
+
+	c.JSON(200, gin.H{"chat_id": chatID})
+}
+
+func GetChats(c *gin.Context) {
+	userID := c.GetString("user_id")
+
+	rows, err := db.DB.Query(`
+		SELECT 
+			c.id,
+			c.is_group,
+			ARRAY_AGG(DISTINCT m.user_id) AS members,
+			COUNT(msg.id) FILTER (
+				WHERE msg.sender_id <> $1 AND msg.status <> 'seen'
+			) AS unread_count,
+			MAX(msg.created_at) AS last_activity,
+			-- Get last message content for preview
+			(SELECT content FROM messages 
+			 WHERE chat_id = c.id 
+			 ORDER BY created_at DESC LIMIT 1) AS last_message,
+			-- Get last message timestamp for sorting
+			(SELECT created_at FROM messages 
+			 WHERE chat_id = c.id 
+			 ORDER BY created_at DESC LIMIT 1) AS last_message_time,
+			-- Get last message sender for display
+			(SELECT sender_id FROM messages 
+			 WHERE chat_id = c.id 
+			 ORDER BY created_at DESC LIMIT 1) AS last_message_sender
+		FROM chats c
+		JOIN chat_members m ON m.chat_id = c.id
+		LEFT JOIN messages msg ON msg.chat_id = c.id
+		WHERE c.id IN (
+			SELECT chat_id FROM chat_members WHERE user_id = $1
+		)
+		GROUP BY c.id, c.is_group
+		ORDER BY 
+			-- Pin chats with unread messages first
+			CASE WHEN COUNT(msg.id) FILTER (
+				WHERE msg.sender_id <> $1 AND msg.status <> 'seen'
+			) > 0 THEN 0 ELSE 1 END,
+			-- Then by last activity (most recent first)
+			COALESCE(MAX(msg.created_at), c.created_at) DESC
+	`, userID)
+
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	defer rows.Close()
+
+	type ChatResponse struct {
+		ID                 string    `json:"id"`
+		IsGroup            bool      `json:"is_group"`
+		Members            []string  `json:"members"`
+		UnreadCount        int       `json:"unread_count"`
+		LastActivity       time.Time `json:"last_activity"`
+		LastMessage        *string   `json:"last_message,omitempty"`
+		LastMessageTime    *string   `json:"last_message_time,omitempty"`
+		LastMessageSender  *string   `json:"last_message_sender,omitempty"`
+	}
+
+	var chats []ChatResponse
+
+	for rows.Next() {
+		var chat ChatResponse
+		var lastActivity sql.NullTime
+		var lastMessage, lastMessageTime, lastMessageSender sql.NullString
+		
+		if err := rows.Scan(
+			&chat.ID, 
+			&chat.IsGroup, 
+			pq.Array(&chat.Members), 
+			&chat.UnreadCount,
+			&lastActivity,
+			&lastMessage,
+			&lastMessageTime,
+			&lastMessageSender,
+		); err != nil {
+			c.JSON(500, gin.H{"error": err.Error()})
+			return
+		}
+		
+		if lastActivity.Valid {
+			chat.LastActivity = lastActivity.Time
+		}
+		
+		if lastMessage.Valid {
+			chat.LastMessage = &lastMessage.String
+		}
+		
+		if lastMessageTime.Valid {
+			chat.LastMessageTime = &lastMessageTime.String
+		}
+		
+		if lastMessageSender.Valid {
+			chat.LastMessageSender = &lastMessageSender.String
+		}
+		
+		chats = append(chats, chat)
+	}
+
+	c.JSON(200, chats)
+}
+
+func AddMember(c *gin.Context) {
+	chatID := c.Param("id")
+
+	var req struct {
+		UserID string `json:"user_id"`
+	}
+	if err := c.BindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+
+	_, err := db.DB.Exec(
+		"INSERT INTO chat_members (chat_id, user_id) VALUES ($1, $2)",
+		chatID,
+		req.UserID,
+	)
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "user already in chat"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "member added"})
+}
+
+```
+
+media_download.go:
+```
+package handlers
+
+import (
+    "net/http"
+
+    "messenger/internal/db"
+
+    "github.com/gin-gonic/gin"
+)
+
+func DownloadMedia(c *gin.Context) {
+    userID := c.GetString("user_id")
+    mediaID := c.Param("id")
+
+    var path, chatID, filename, mimeType string
+    var downloaded bool
+
+    // Try to get from media_messages first (for backward compatibility)
+    err := db.DB.QueryRow(
+        `SELECT m.file_path, m.chat_id, m.downloaded, msg.filename, msg.mime_type
+         FROM media_messages m
+         JOIN messages msg ON msg.id = m.id
+         WHERE m.id = $1`,
+        mediaID,
+    ).Scan(&path, &chatID, &downloaded, &filename, &mimeType)
+
+    if err != nil {
+        // If not found in media_messages, try messages table directly
+        err = db.DB.QueryRow(
+            `SELECT file_path, chat_id, filename, mime_type
+             FROM messages
+             WHERE id = $1 AND type = 'media'`,
+            mediaID,
+        ).Scan(&path, &chatID, &filename, &mimeType)
+        
+        if err != nil {
+            c.JSON(http.StatusNotFound, gin.H{"error": "media not found"})
+            return
+        }
+    }
+
+    // 🔒 Check membership
+    var ok bool
+    db.DB.QueryRow(
+        `SELECT EXISTS (
+            SELECT 1 FROM chat_members
+            WHERE chat_id = $1 AND user_id = $2
+        )`,
+        chatID, userID,
+    ).Scan(&ok)
+
+    if !ok {
+        c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
+        return
+    }
+
+    // Set proper headers
+    c.Header("Content-Disposition", "attachment; filename="+filename)
+    c.Header("Content-Type", mimeType)
+    
+    // 📤 Send file
+    c.File(path)
+
+    // Update download status if exists in media_messages table
+    go func() {
+        _, _ = db.DB.Exec(
+            `UPDATE media_messages SET downloaded = true WHERE id = $1`,
+            mediaID,
+        )
+    }()
+}
+```
+
+media.go:
+```
+package handlers
+
+import (
+    "fmt"
+    "net/http"
+    "os"
+    "path/filepath"
+    "time"
+
+    "messenger/internal/db"
+    "messenger/internal/websocket"
+
+    "github.com/gin-gonic/gin"
+)
+
+func UploadMedia(c *gin.Context) {
+    userID := c.GetString("user_id")
+    chatID := c.PostForm("chat_id")
+
+    // 🔒 Check chat membership
+    var ok bool
+    err := db.DB.QueryRow(
+        `SELECT EXISTS (
+            SELECT 1 FROM chat_members
+            WHERE chat_id = $1 AND user_id = $2
+        )`,
+        chatID, userID,
+    ).Scan(&ok)
+
+    if err != nil || !ok {
+        c.JSON(http.StatusForbidden, gin.H{"error": "not a chat member"})
+        return
+    }
+
+    file, err := c.FormFile("file")
+    if err != nil {
+        c.JSON(400, gin.H{"error": "file required"})
+        return
+    }
+
+    dir := filepath.Join("private_uploads", chatID)
+    _ = os.MkdirAll(dir, 0700)
+
+    filename := fmt.Sprintf("%d_%s", time.Now().UnixNano(), file.Filename)
+    path := filepath.Join(dir, filename)
+
+    if err := c.SaveUploadedFile(file, path); err != nil {
+        c.JSON(500, gin.H{"error": "failed to save file"})
+        return
+    }
+
+    mimeType := file.Header.Get("Content-Type")
+    
+    // Start transaction
+    tx, err := db.DB.Begin()
+    if err != nil {
+        c.JSON(500, gin.H{"error": "db error"})
+        return
+    }
+    defer tx.Rollback()
+
+    // 1️⃣ Insert into messages table (for chat history)
+    var messageID int
+    var createdAt string
+    err = tx.QueryRow(
+        `INSERT INTO messages (chat_id, sender_id, content, type, file_path, filename, mime_type)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         RETURNING id, created_at`,
+        chatID,
+        userID,
+        filename, // content will be filename for media
+        "media",  // type = 'media' instead of 'text'
+        path,
+        file.Filename,
+        mimeType,
+    ).Scan(&messageID, &createdAt)
+
+    if err != nil {
+        c.JSON(500, gin.H{"error": "failed to save message: " + err.Error()})
+        return
+    }
+
+    // 2️⃣ Also insert into media_messages table for download tracking
+    _, err = tx.Exec(
+        `INSERT INTO media_messages (id, chat_id, sender_id, file_path, mime_type)
+         VALUES ($1, $2, $3, $4, $5)`,
+        messageID,  // Use same ID as messages table
+        chatID,
+        userID,
+        path,
+        mimeType,
+    )
+
+    if err != nil {
+        c.JSON(500, gin.H{"error": "db error: " + err.Error()})
+        return
+    }
+
+    if err = tx.Commit(); err != nil {
+        c.JSON(500, gin.H{"error": "commit failed: " + err.Error()})
+        return
+    }
+
+    // 🔔 Broadcast media message
+    websocket.GlobalHub.BroadcastMedia(
+        chatID,
+        messageID,
+        file.Filename,
+        userID,
+        createdAt,
+    )
+
+    c.JSON(200, gin.H{"message_id": messageID})
+}
+```
+
+messages.go:
+```
+package handlers
+
+import (
+    "messenger/internal/db"
+    "messenger/internal/websocket"
+    "net/http"
+    "time"
+
+    "github.com/gin-gonic/gin"
+)
+
+func GetMessages(c *gin.Context) {
+    chatID := c.Param("chatId")
+    userID := c.GetString("user_id")
+
+    var exists bool
+    db.DB.QueryRow(
+        `SELECT EXISTS (
+            SELECT 1 FROM chat_members
+            WHERE chat_id = $1 AND user_id = $2
+        )`,
+        chatID, userID,
+    ).Scan(&exists)
+
+    if !exists {
+        c.JSON(http.StatusForbidden, gin.H{"error": "not a chat member"})
+        return
+    }
+
+    // Mark messages as seen when user fetches them
+    rows, _ := db.DB.Query(
+        `UPDATE messages
+         SET status = 'seen'
+         WHERE chat_id = $1
+         AND sender_id != $2
+         AND status != 'seen'
+         RETURNING id`,
+        chatID, userID,
+    )
+
+    var seenIDs []int
+    for rows.Next() {
+        var id int
+        rows.Scan(&id)
+        seenIDs = append(seenIDs, id)
+    }
+
+    if len(seenIDs) > 0 {
+        websocket.GlobalHub.BroadcastSeen(chatID, seenIDs)
+    }
+
+    // Fetch ALL messages including media
+    rows2, err := db.DB.Query(
+        `SELECT 
+            id, 
+            sender_id, 
+            content, 
+            created_at, 
+            status, 
+            reply_to,
+            type,
+            file_path,
+            filename,
+            mime_type
+         FROM messages
+         WHERE chat_id = $1
+         ORDER BY created_at ASC`,
+        chatID,
+    )
+
+    if err != nil {
+        c.JSON(500, gin.H{"error": err.Error()})
+        return
+    }
+    defer rows2.Close()
+
+    type Message struct {
+        ID        int        `json:"id"`
+        From      string     `json:"from"`
+        Content   string     `json:"content"`
+        CreatedAt time.Time  `json:"created_at"`
+        Status    string     `json:"status"`
+        ReplyTo   *int       `json:"reply_to"`
+        Type      string     `json:"type"`
+        FilePath  *string    `json:"file_path,omitempty"`
+        Filename  *string    `json:"filename,omitempty"`
+        MimeType  *string    `json:"mime_type,omitempty"`
+    }
+
+    var messages []Message
+    for rows2.Next() {
+        var m Message
+        var replyTo *int
+        var filePath, filename, mimeType *string
+        
+        err := rows2.Scan(
+            &m.ID, 
+            &m.From, 
+            &m.Content, 
+            &m.CreatedAt, 
+            &m.Status, 
+            &replyTo,
+            &m.Type,
+            &filePath,
+            &filename,
+            &mimeType,
+        )
+        if err != nil {
+            c.JSON(500, gin.H{"error": err.Error()})
+            return
+        }
+        
+        m.ReplyTo = replyTo
+        m.FilePath = filePath
+        m.Filename = filename
+        m.MimeType = mimeType
+        messages = append(messages, m)
+    }
+
+    c.JSON(http.StatusOK, messages)
+}
+```
+
+profile.go:
+```
+package handlers
+
+import (
+	"messenger/internal/db"
+	"golang.org/x/crypto/bcrypt"
+	"github.com/gin-gonic/gin"
+)
+func ChangeUsername(c *gin.Context) {
+	current := c.GetString("user_id")
+
+	var req struct {
+		NewUsername string `json:"new_username"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil || req.NewUsername == "" {
+		c.JSON(400, gin.H{"error": "invalid request"})
+		return
+	}
+
+	// Check uniqueness
+	var exists bool
+	db.DB.QueryRow(
+		`SELECT EXISTS (SELECT 1 FROM users WHERE id = $1)`,
+		req.NewUsername,
+	).Scan(&exists)
+
+	if exists {
+		c.JSON(400, gin.H{"error": "username already taken"})
+		return
+	}
+
+	tx, err := db.DB.Begin()
+	if err != nil {
+		c.JSON(500, gin.H{"error": "db error"})
+		return
+	}
+	defer tx.Rollback()
+
+	// Update users table
+	_, err = tx.Exec(
+		`UPDATE users SET id = $1 WHERE id = $2`,
+		req.NewUsername, current,
+	)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Update chat_members
+	_, err = tx.Exec(
+		`UPDATE chat_members SET user_id = $1 WHERE user_id = $2`,
+		req.NewUsername, current,
+	)
+	if err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		c.JSON(500, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Force re-login
+	c.JSON(200, gin.H{
+		"message": "username updated, please login again",
+	})
+}
+func ChangePassword(c *gin.Context) {
+	user := c.GetString("user_id")
+
+	var req struct {
+		OldPassword string `json:"old_password"`
+		NewPassword string `json:"new_password"`
+	}
+
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, gin.H{"error": "invalid request"})
+		return
+	}
+
+	var hash string
+	err := db.DB.QueryRow(
+		`SELECT password_hash FROM users WHERE id = $1`,
+		user,
+	).Scan(&hash)
+
+	if err != nil || bcrypt.CompareHashAndPassword(
+		[]byte(hash), []byte(req.OldPassword),
+	) != nil {
+		c.JSON(401, gin.H{"error": "incorrect old password"})
+		return
+	}
+
+	newHash, _ := bcrypt.GenerateFromPassword(
+		[]byte(req.NewPassword),
+		bcrypt.DefaultCost,
+	)
+
+	_, err = db.DB.Exec(
+		`UPDATE users SET password_hash = $1 WHERE id = $2`,
+		string(newHash), user,
+	)
+
+	if err != nil {
+		c.JSON(500, gin.H{"error": "failed to update password"})
+		return
+	}
+
+	c.JSON(200, gin.H{"message": "password updated"})
+}
+```
+
+
+Chatters/internal/middleware/auth.go:
+```
+package middleware
+
+import (
+	"net/http"
+	"strings"
+
+	"messenger/internal/auth"
+
+	"github.com/gin-gonic/gin"
+)
+
+func AuthMiddleware() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		header := c.GetHeader("Authorization")
+		if header == "" {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "missing token"})
+			return
+		}
+
+		tokenStr := strings.TrimPrefix(header, "Bearer ")
+		token, claims, err := auth.ValidateToken(tokenStr)
+
+		if err != nil || !token.Valid {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token"})
+			return
+		}
+
+		userID, ok := claims["user_id"].(string)
+		if !ok {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "invalid token data"})
+			return
+		}
+
+		c.Set("user_id", userID)
+
+		c.Set("user_id", claims["user_id"])
+
+		c.Next()
+	}
+}
+```
+
+Chatters/internal/websocket/:
+
+client.go:
+```
+package websocket
+
+import (
+	"encoding/json"
+	"messenger/internal/db"
+	"github.com/gorilla/websocket"
+)
+
+type Client struct {
+	UserID string
+	Conn   *websocket.Conn
+	Send   chan []byte
+}
+
+func readPump(hub *Hub, client *Client) {
+	defer func() {
+		hub.Unregister <- client
+		client.Conn.Close()
+	}()
+
+	for {
+		_, message, err := client.Conn.ReadMessage()
+		if err != nil {
+			break
+		}
+
+		var msg ChatMessage
+		if err := json.Unmarshal(message, &msg); err != nil {
+			continue
+		}
+
+		// 🔴 HANDLE "SEEN" EVENT HERE
+		if msg.Type == "seen" {
+			rows, _ := db.DB.Query(
+				`UPDATE messages
+				 SET status = 'seen'
+				 WHERE chat_id = $1
+				 AND sender_id != $2
+				 AND status != 'seen'
+				 RETURNING id`,
+				msg.ChatID, client.UserID,
+			)
+
+			var seenIDs []int
+			for rows.Next() {
+				var id int
+				rows.Scan(&id)
+				seenIDs = append(seenIDs, id)
+			}
+
+			if len(seenIDs) > 0 {
+				hub.BroadcastSeen(msg.ChatID, seenIDs)
+			}
+
+			continue // ⬅️ IMPORTANT: do NOT treat as chat message
+		}
+
+		// 🟢 NORMAL CHAT MESSAGE
+		msg.From = client.UserID
+		hub.Incoming <- msg
+	}
+}
+
+func writePump(client *Client) {
+	defer client.Conn.Close()
+
+	for msg := range client.Send {
+		err := client.Conn.WriteMessage(websocket.TextMessage, msg)
+		if err != nil {
+			return
+		}
+	}
+}
+```
+
+handler.go:
+```
+package websocket
+
+import (
+	"net/http"
+
+	"messenger/internal/auth" // 🔑 use auth package directly
+
+	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
+)
+
+var upgrader = websocket.Upgrader{
+	CheckOrigin: func(r *http.Request) bool {
+		return true // dev only
+	},
+}
+
+func HandleWebSocket(hub *Hub) gin.HandlerFunc {
+	return func(c *gin.Context) {
+
+		// 🔑 token from query param
+		tokenStr := c.Query("token")
+		if tokenStr == "" {
+			c.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+
+		// 🔐 validate JWT (same logic as middleware)
+		token, claims, err := auth.ValidateToken(tokenStr)
+		if err != nil || !token.Valid {
+			c.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+
+		// 🔑 extract user_id
+		userID, ok := claims["user_id"].(string)
+		if !ok {
+			c.AbortWithStatus(http.StatusUnauthorized)
+			return
+		}
+
+		// 🔌 upgrade connection
+		conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
+		if err != nil {
+			return
+		}
+
+		client := &Client{
+			UserID: userID,
+			Conn:   conn,
+			Send:   make(chan []byte),
+		}
+
+		hub.Register <- client
+
+		go writePump(client)
+		go readPump(hub, client)
+	}
+}
+```
+
+hub.go:
+```
+package websocket
+
+import (
+	"encoding/json"
+
+	"messenger/internal/db"
+)
+
+var GlobalHub *Hub
+
+type Hub struct {
+	Clients    map[string]*Client
+	Register   chan *Client
+	Unregister chan *Client
+	Incoming   chan ChatMessage
+}
+
+type ChatMessage struct {
+	Type      string `json:"type"`
+	ID        int    `json:"id"`
+	ChatID    string `json:"chat_id"`
+	From      string `json:"from"`
+	Content   string `json:"content"`
+	CreatedAt string `json:"created_at"`
+	Status    string `json:"status"`
+	Filename  string `json:"filename,omitempty"`
+	ReplyTo   *int   `json:"reply_to,omitempty"`
+}
+
+func NewHub() *Hub {
+	h := &Hub{
+		Clients:    make(map[string]*Client),
+		Register:   make(chan *Client),
+		Unregister: make(chan *Client),
+		Incoming:   make(chan ChatMessage),
+	}
+	GlobalHub = h
+	return h
+}
+
+func (h *Hub) getChatMembers(chatID string) ([]string, error) {
+	rows, err := db.DB.Query(
+		`SELECT user_id FROM chat_members WHERE chat_id = $1`,
+		chatID,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var members []string
+	for rows.Next() {
+		var id string
+		_ = rows.Scan(&id)
+		members = append(members, id)
+	}
+	return members, nil
+}
+
+func (h *Hub) Run() {
+	for {
+		select {
+
+		case c := <-h.Register:
+			h.Clients[c.UserID] = c
+
+		case c := <-h.Unregister:
+			delete(h.Clients, c.UserID)
+			close(c.Send)
+
+		case msg := <-h.Incoming:
+
+			var id int
+			var createdAt string
+
+			err := db.DB.QueryRow(
+				`INSERT INTO messages (chat_id, sender_id, content, reply_to)
+				VALUES ($1, $2, $3, $4)
+				RETURNING id, created_at`,
+				msg.ChatID, msg.From, msg.Content, msg.ReplyTo,
+			).Scan(&id, &createdAt)
+
+			if err != nil {
+				continue
+			}
+
+			out := ChatMessage{
+				Type:      "message",
+				ID:        id,
+				ChatID:    msg.ChatID,
+				From:      msg.From,
+				Content:   msg.Content,
+				CreatedAt: createdAt,
+				Status:    "sent",
+				ReplyTo:   msg.ReplyTo,
+			}
+
+			members, _ := h.getChatMembers(msg.ChatID)
+
+			for _, userID := range members {
+				if userID == msg.From {
+					continue
+				}
+
+				if _, ok := h.Clients[userID]; ok {
+					// recipient is online → mark seen immediately
+					db.DB.Exec(
+						`UPDATE messages SET status='seen' WHERE id=$1`,
+						id,
+					)
+
+					h.BroadcastSeen(msg.ChatID, []int{id})
+
+					out.Status = "seen"
+				}
+			}
+
+
+			data, _ := json.Marshal(out)
+
+			for _, userID := range members {
+				if client, ok := h.Clients[userID]; ok {
+					client.Send <- data
+				}
+			}
+
+		}
+	}
+}
+
+func (h *Hub) BroadcastSeen(chatID string, messageIDs []int) {
+	payload, _ := json.Marshal(map[string]interface{}{
+		"type":        "seen",
+		"chat_id":     chatID,
+		"message_ids": messageIDs,
+	})
+
+	members, _ := h.getChatMembers(chatID)
+
+	for _, userID := range members {
+		if client, ok := h.Clients[userID]; ok {
+			client.Send <- payload
+		}
+	}
+}
+
+
+func (h *Hub) BroadcastMedia(
+    chatID string,
+    messageID int,
+    filename string,
+    from string,
+    createdAt string,
+) {
+    // Create proper media message payload
+    payload, _ := json.Marshal(map[string]interface{}{
+        "type":       "message",  // Changed from "media" to "message" for consistency
+        "id":         messageID,
+        "chat_id":    chatID,
+        "from":       from,
+        "content":    filename,
+        "created_at": createdAt,
+        "status":     "sent",
+        "filename":   filename,
+        "mime_type":  "application/octet-stream", // You might want to store this properly
+    })
+
+    members, _ := h.getChatMembers(chatID)
+
+    for _, userID := range members {
+        if client, ok := h.Clients[userID]; ok {
+            client.Send <- payload
+        }
+    }
+}
+```
+
+persist.go:
+```
+package websocket
+
+import (
+	"messenger/internal/db"
+
+	"github.com/google/uuid"
+)
+
+func saveMessage(msg ChatMessage) {
+	db.DB.Exec(
+		`INSERT INTO messages (id, chat_id, sender_id, content)
+		 VALUES ($1, $2, $3, $4)`,
+		uuid.New(),
+		msg.ChatID,
+		msg.From,
+		msg.Content,
+	)
+}
+```
+
+

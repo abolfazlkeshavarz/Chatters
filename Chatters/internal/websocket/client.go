@@ -1,9 +1,9 @@
 package websocket
 
 import (
-	"github.com/gorilla/websocket"
-	"messenger/internal/db"
 	"encoding/json"
+	"messenger/internal/db"
+	"github.com/gorilla/websocket"
 )
 
 type Client struct {

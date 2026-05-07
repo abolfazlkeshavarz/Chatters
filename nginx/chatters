@@ -1,0 +1,79 @@
+server {
+    server_name www.abolfazl.fun abolfazl.fun;
+
+    # React build output
+    root /var/www/chatters/frontend;
+    index index.html;
+
+    # ------------------------
+    # AUTH ROUTES
+    # ------------------------
+    location ~ ^/(login|register)$ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+
+    # ------------------------
+    # API + WEBSOCKET
+    # ------------------------
+    location /api/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+
+        # WebSocket support
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+	proxy_read_timeout 86400;
+	proxy_send_timeout 86400;
+	proxy_connect_timeout 60;
+
+    }
+
+    # ------------------------
+    # REACT ROUTING
+    # ------------------------
+    location / {
+        try_files $uri /index.html;
+    }
+
+    # ------------------------
+    # MEDIA UPLOAD LIMIT
+    # ------------------------
+    client_max_body_size 20M;
+
+    listen 443 ssl; # managed by Certbot
+    ssl_certificate /etc/letsencrypt/live/abolfazl.fun/fullchain.pem; # managed by Certbot
+    ssl_certificate_key /etc/letsencrypt/live/abolfazl.fun/privkey.pem; # managed by Certbot
+    include /etc/letsencrypt/options-ssl-nginx.conf; # managed by Certbot
+    ssl_dhparam /etc/letsencrypt/ssl-dhparams.pem; # managed by Certbot
+
+
+}
+
+server {
+    if ($host = www.abolfazl.fun) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    if ($host = abolfazl.fun) {
+        return 301 https://$host$request_uri;
+    } # managed by Certbot
+
+
+    listen 80;
+    server_name abolfazl.fun www.abolfazl.fun;
+    return 404; # managed by Certbot
+
+
+
+
+}

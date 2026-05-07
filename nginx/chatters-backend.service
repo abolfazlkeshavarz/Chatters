@@ -1,0 +1,16 @@
+[Unit]
+Description=Chatters Backend
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=www-data
+WorkingDirectory=/var/www/chatters/backend
+ExecStart=/var/www/chatters/backend/chatters-backend
+Restart=always
+RestartSec=3
+Environment=GIN_MODE=release
+Environment=UPLOAD_DIR=/var/www/chatters/backend/private_uploads
+LimitNOFILE=65535
+[Install]
+WantedBy=multi-user.target

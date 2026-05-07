@@ -1,0 +1,13 @@
+[Unit]
+Description=Messages Auto Deleter
+After=network.target postgresql.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu
+ExecStart=/usr/bin/bash msgautodel.sh
+Restart=always
+RestartSec=10
+[Install]
+WantedBy=multi-user.target

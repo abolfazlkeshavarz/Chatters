@@ -24,6 +24,7 @@ type ChatMessage struct {
 	CreatedAt string `json:"created_at"`
 	Status    string `json:"status"`
 	Filename  string `json:"filename,omitempty"`
+	ReplyTo   *int   `json:"reply_to,omitempty"`
 }
 
 func NewHub() *Hub {
@@ -73,10 +74,10 @@ func (h *Hub) Run() {
 			var createdAt string
 
 			err := db.DB.QueryRow(
-				`INSERT INTO messages (chat_id, sender_id, content)
-				 VALUES ($1, $2, $3)
-				 RETURNING id, created_at`,
-				msg.ChatID, msg.From, msg.Content,
+				`INSERT INTO messages (chat_id, sender_id, content, reply_to)
+				VALUES ($1, $2, $3, $4)
+				RETURNING id, created_at`,
+				msg.ChatID, msg.From, msg.Content, msg.ReplyTo,
 			).Scan(&id, &createdAt)
 
 			if err != nil {
@@ -91,16 +92,38 @@ func (h *Hub) Run() {
 				Content:   msg.Content,
 				CreatedAt: createdAt,
 				Status:    "sent",
+				ReplyTo:   msg.ReplyTo,
 			}
 
-			data, _ := json.Marshal(out)
 			members, _ := h.getChatMembers(msg.ChatID)
+
+			for _, userID := range members {
+				if userID == msg.From {
+					continue
+				}
+
+				if _, ok := h.Clients[userID]; ok {
+					// recipient is online → mark seen immediately
+					db.DB.Exec(
+						`UPDATE messages SET status='seen' WHERE id=$1`,
+						id,
+					)
+
+					h.BroadcastSeen(msg.ChatID, []int{id})
+
+					out.Status = "seen"
+				}
+			}
+
+
+			data, _ := json.Marshal(out)
 
 			for _, userID := range members {
 				if client, ok := h.Clients[userID]; ok {
 					client.Send <- data
 				}
 			}
+
 		}
 	}
 }
@@ -121,27 +144,32 @@ func (h *Hub) BroadcastSeen(chatID string, messageIDs []int) {
 	}
 }
 
+
 func (h *Hub) BroadcastMedia(
-	chatID string,
-	mediaID int,
-	filename string,
-	from string,
-	createdAt string,
+    chatID string,
+    messageID int,
+    filename string,
+    from string,
+    createdAt string,
 ) {
-	payload, _ := json.Marshal(ChatMessage{
-		Type:      "media",
-		ID:        mediaID,
-		ChatID:    chatID,
-		From:      from,
-		Filename:  filename,
-		CreatedAt: createdAt,
-	})
+    // Create proper media message payload
+    payload, _ := json.Marshal(map[string]interface{}{
+        "type":       "message",  // Changed from "media" to "message" for consistency
+        "id":         messageID,
+        "chat_id":    chatID,
+        "from":       from,
+        "content":    filename,
+        "created_at": createdAt,
+        "status":     "sent",
+        "filename":   filename,
+        "mime_type":  "application/octet-stream", // You might want to store this properly
+    })
 
-	members, _ := h.getChatMembers(chatID)
+    members, _ := h.getChatMembers(chatID)
 
-	for _, userID := range members {
-		if client, ok := h.Clients[userID]; ok {
-			client.Send <- payload
-		}
-	}
+    for _, userID := range members {
+        if client, ok := h.Clients[userID]; ok {
+            client.Send <- payload
+        }
+    }
 }
