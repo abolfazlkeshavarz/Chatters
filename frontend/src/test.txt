@@ -1,0 +1,276 @@
+// import { useEffect, useRef, useState } from "react";
+// import { getMessages } from "../api/messages";
+// import { connectWebSocket } from "../services/websocket";
+// import { uploadMedia } from "../api/media";
+
+// function formatTime(ts) {
+//   return new Date(ts).toLocaleTimeString("fa-IR", {
+//     hour: "2-digit",
+//     minute: "2-digit",
+//   });
+// }
+
+// export default function Chat({ chatId, title, onBack }) {
+//   const [messages, setMessages] = useState([]);
+//   const [text, setText] = useState("");
+//   const wsRef = useRef(null);
+//   const bottomRef = useRef(null);
+//   const fileInputRef = useRef(null);
+
+//   const me = localStorage.getItem("username");
+//   const token = localStorage.getItem("token");
+
+//   useEffect(() => {
+//     getMessages(chatId).then(data => setMessages(data || []));
+
+//     wsRef.current = connectWebSocket(msg => {
+//       if (msg.chat_id !== chatId) return;
+
+//       if (msg.type === "message" || msg.type === "media") {
+//         setMessages(prev => [...prev, msg]);
+//       }
+
+//       if (msg.type === "seen") {
+//         setMessages(prev =>
+//           prev.map(m =>
+//             m.from === me ? { ...m, status: "seen" } : m
+//           )
+//         );
+//       }
+//     });
+
+//     wsRef.current.onopen = () => {
+//       wsRef.current.send(
+//         JSON.stringify({ type: "seen", chat_id: chatId })
+//       );
+//     };
+
+//     return () => wsRef.current?.close();
+//   }, [chatId]);
+
+//   useEffect(() => {
+//     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+//   }, [messages]);
+
+//   function sendMessage() {
+//     if (!text.trim()) return;
+
+//     wsRef.current.send(
+//       JSON.stringify({ chat_id: chatId, content: text })
+//     );
+//     setText("");
+//   }
+
+//   async function handleAttach(e) {
+//     const file = e.target.files[0];
+//     if (!file) return;
+
+//     try {
+//       await uploadMedia(chatId, file);
+//     } catch {
+//       alert("آپلود فایل ناموفق بود");
+//     }
+
+//     e.target.value = "";
+//   }
+
+//   async function downloadMedia(id, filename) {
+//     try {
+//       const res = await fetch(`/api/media/${id}`, {
+//         headers: { Authorization: `Bearer ${token}` },
+//       });
+
+//       if (!res.ok) throw new Error();
+
+//       const blob = await res.blob();
+//       const url = window.URL.createObjectURL(blob);
+
+//       const a = document.createElement("a");
+//       a.href = url;
+//       a.download = filename;
+//       a.click();
+
+//       window.URL.revokeObjectURL(url);
+//     } catch {
+//       alert("دانلود فایل ناموفق بود");
+//     }
+//   }
+
+//   return (
+//     <div style={styles.page}>
+//       {/* Header */}
+//       <div style={styles.header}>
+//         <button style={styles.back} onClick={onBack}>←</button>
+//         <div style={styles.title}>{title}</div>
+//       </div>
+
+//       {/* Messages */}
+//       <div style={styles.messages}>
+//         {messages.map((m, i) => {
+//           const isMe = m.from === me;
+
+//           return (
+//             <div
+//               key={i}
+//               style={{
+//                 ...styles.row,
+//                 justifyContent: isMe ? "flex-end" : "flex-start",
+//               }}
+//             >
+//               <div
+//                 style={{
+//                   ...styles.bubble,
+//                   background: isMe
+//                     ? m.status === "seen"
+//                       ? "#34c759"
+//                       : "#007aff"
+//                     : "#e5e5ea",
+//                   color: isMe ? "#fff" : "#000",
+//                 }}
+//               >
+//                 {m.type === "media" ? (
+//                   <button
+//                     onClick={() => downloadMedia(m.id, m.filename)}
+//                     style={styles.mediaBtn}
+//                   >
+//                     📎 {m.filename}
+//                   </button>
+//                 ) : (
+//                   <div> <span style={{ fontSize:14}}>{m.from}</span>: {m.content}</div>
+//                 )}
+//                 <div style={styles.time}>
+//                   {formatTime(m.created_at)}
+//                 </div>
+//               </div>
+//             </div>
+//           );
+//         })}
+//         <div ref={bottomRef} />
+//       </div>
+
+//       {/* Input */}
+//       <div style={styles.inputBar}>
+//         <button
+//           style={styles.attach}
+//           onClick={() => fileInputRef.current.click()}
+//         >
+//           📎
+//         </button>
+
+//         <input
+//           ref={fileInputRef}
+//           type="file"
+//           style={{ display: "none" }}
+//           onChange={handleAttach}
+//         />
+
+//         <input
+//           style={styles.input}
+//           value={text}
+//           placeholder="پیام"
+//           onChange={e => setText(e.target.value)}
+//           onKeyDown={e => e.key === "Enter" && sendMessage()}
+//         />
+
+//         <button
+//           style={{
+//             ...styles.send,
+//             opacity: text.trim() ? 1 : 0.5,
+//           }}
+//           onClick={sendMessage}
+//           disabled={!text.trim()}
+//         >
+//           ➤
+//         </button>
+//       </div>
+//     </div>
+//   );
+// }
+
+// const styles = {
+//   page: {
+//     height: "100dvh",
+//     display: "flex",
+//     flexDirection: "column",
+//     background: "#f2f2f7",
+//   },
+//   header: {
+//     height: 56,
+//     display: "flex",
+//     alignItems: "center",
+//     gap: 8,
+//     padding: "0 12px",
+//     borderBottom: "1px solid #ddd",
+//     background: "#fff",
+//     position: "sticky",
+//     top: 0,
+//     zIndex: 10,
+//   },
+//   back: { fontSize: 20, border: "none", background: "none" },
+//   title: { fontSize: 16, fontWeight: 500 },
+
+//   messages: {
+//     flex: 1,
+//     padding: "10px 8px",
+//     overflowY: "auto",
+//     display: "flex",
+//     flexDirection: "column",
+//     gap: 6,
+//   },
+
+//   row: { display: "flex" },
+
+//   bubble: {
+//     maxWidth: "85%",
+//     padding: "10px 14px",
+//     borderRadius: 18,
+//     fontSize: 14,
+//     wordBreak: "break-word",
+//   },
+
+//   time: { fontSize: 11, opacity: 0.6, marginTop: 4 },
+
+//   mediaBtn: {
+//     background: "transparent",
+//     border: "none",
+//     color: "inherit",
+//     cursor: "pointer",
+//     fontWeight: 500,
+//   },
+
+//   inputBar: {
+//     display: "flex",
+//     padding: 8,
+//     gap: 8,
+//     borderTop: "1px solid #ddd",
+//     background: "#fff",
+//     position: "sticky",
+//     bottom: 0,
+//   },
+
+//   attach: {
+//     width: 42,
+//     height: 42,
+//     borderRadius: "50%",
+//     border: "none",
+//     background: "#e5e5ea",
+//   },
+
+//   input: {
+//     flex: 1,
+//     padding: 10,
+//     borderRadius: 20,
+//     border: "1px solid #ccc",
+//     fontSize: 16,
+//   },
+
+//   send: {
+//     width: 42,
+//     height: 42,
+//     borderRadius: "50%",
+//     border: "none",
+//     background: "#007aff",
+//     color: "#fff",
+//   },
+// };
+
