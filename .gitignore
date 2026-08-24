@@ -1,0 +1,19 @@
+# Environment
+.env
+
+# Go
+Chatters/private_uploads/
+Chatters/chatters-server
+Chatters/server
+
+# Node / React
+frontend/node_modules/
+frontend/build/
+frontend/coverage/
+
+# IDE
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
