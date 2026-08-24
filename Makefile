@@ -11,13 +11,16 @@ help: ## Show this help
 env: ## Create .env from .env.example if it does not exist yet
 	@if [ ! -f .env ]; then \
 		cp .env.example .env; \
-		echo ".env created — now run 'make secrets' to fill in the generated values"; \
+		echo ".env created - now run 'make secrets' to fill in the generated values"; \
 	else \
 		echo ".env already exists"; \
 	fi
 
+# Invoked as "bash <relative path>" rather than through the script's shebang:
+# relying on the shebang breaks when the checkout path contains a space, which
+# is common on Windows.
 secrets: env ## Generate JWT_SECRET and VAPID keys into .env (only fills empty values)
-	@./scripts/gen-secrets.sh
+	@bash scripts/gen-secrets.sh
 
 vapid: ## Print a fresh Web Push VAPID key pair
 	cd Chatters && go run ./cmd/vapid

@@ -2,6 +2,7 @@ package config
 
 import (
 	"log"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -104,17 +105,28 @@ func trustedProxies() []string {
 	}
 }
 
+// databaseURL assembles the connection string with url.URL rather than string
+// concatenation. A strong password routinely contains characters that are
+// syntactically meaningful in a URL — "openssl rand -base64" alone emits "+",
+// "/" and "=" — and pasting those in raw either fails to parse or, worse,
+// silently reinterprets part of the password as the host or path.
 func databaseURL() string {
 	if dsn := os.Getenv("DATABASE_URL"); dsn != "" {
 		return dsn
 	}
-	return "postgres://" +
-		env("DB_USER", "postgres") + ":" +
-		env("DB_PASSWORD", "admin") + "@" +
-		env("DB_HOST", "localhost") + ":" +
-		env("DB_PORT", "5432") + "/" +
-		env("DB_NAME", "messenger") +
-		"?sslmode=" + env("DB_SSLMODE", "disable")
+
+	u := url.URL{
+		Scheme: "postgres",
+		User:   url.UserPassword(env("DB_USER", "postgres"), env("DB_PASSWORD", "admin")),
+		Host:   net.JoinHostPort(env("DB_HOST", "localhost"), env("DB_PORT", "5432")),
+		Path:   "/" + env("DB_NAME", "messenger"),
+	}
+
+	q := url.Values{}
+	q.Set("sslmode", env("DB_SSLMODE", "disable"))
+	u.RawQuery = q.Encode()
+
+	return u.String()
 }
 
 // allowedOrigins is the extra browser-origin allowlist shared by CORS and the
