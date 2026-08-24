@@ -1,16 +1,23 @@
 import { useState } from "react";
 import { register } from "../api/auth";
 
-export default function Register({ onRegister }) {
-  const [username, setUsername] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
+export default function Register({ onRegister, onBack }) {
+  const [form, setForm] = useState({ username: "", email: "", password: "" });
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  async function handleRegister() {
-    if (!username || !email || !password) {
+  const update = (key) => (e) =>
+    setForm((f) => ({ ...f, [key]: e.target.value }));
+
+  async function handleRegister(e) {
+    e?.preventDefault();
+
+    if (!form.username || !form.email || !form.password) {
       setError("Please fill all fields");
+      return;
+    }
+    if (form.password.length < 8) {
+      setError("Password must be at least 8 characters");
       return;
     }
 
@@ -18,12 +25,8 @@ export default function Register({ onRegister }) {
     setError("");
 
     try {
-      const res = await register(username, email, password);
-
-      alert(
-        `Account created successfully.\nYour username is: ${res.username}`
-      );
-
+      const res = await register(form.username, form.email, form.password);
+      alert(`Account created. Your username is: ${res.username}`);
       onRegister();
     } catch (err) {
       setError(err.message || "Registration failed");
@@ -34,113 +37,69 @@ export default function Register({ onRegister }) {
 
   return (
     <div style={styles.page}>
-      <div style={styles.card}>
-        <h2 style={styles.title}>Create Account</h2>
-        <p style={styles.subtitle}>
-          Choose a unique username
-        </p>
+      <form style={styles.card} className="card stack" onSubmit={handleRegister}>
+        <h2 style={styles.title}>Create account</h2>
 
         <input
-          style={styles.input}
-          placeholder="نام کاربری(حساس به حروف کوچیک و بزرگ)"
-          value={username}
-          onChange={e => setUsername(e.target.value)}
+          className="field"
+          placeholder="نام کاربری (حساس به حروف کوچیک و بزرگ)"
+          autoComplete="username"
+          autoCapitalize="none"
+          value={form.username}
+          onChange={update("username")}
         />
 
         <input
-          style={styles.input}
+          className="field"
+          type="email"
           placeholder="Email address"
-          value={email}
-          onChange={e => setEmail(e.target.value)}
+          autoComplete="email"
+          autoCapitalize="none"
+          value={form.email}
+          onChange={update("email")}
         />
 
         <input
+          className="field"
           type="password"
-          style={styles.input}
-          placeholder="رمز"
-          value={password}
-          onChange={e => setPassword(e.target.value)}
+          placeholder="رمز (حداقل ۸ کاراکتر)"
+          autoComplete="new-password"
+          value={form.password}
+          onChange={update("password")}
         />
 
-        <div style={styles.hint}>
-          If a username is taken, add numbers or letters
+        <div className="muted" style={{ textAlign: "center", lineHeight: 1.6 }}>
+          3–32 characters: letters, digits, dot, underscore or hyphen.
           <br />
-          مثال: <strong>ali9x3f</strong>
+          If a username is taken, add numbers — e.g. <strong>ali9x3f</strong>
         </div>
 
-        {error && <div style={styles.error}>{error}</div>}
+        {error && <div className="error-text" style={{ textAlign: "center" }}>{error}</div>}
 
-        <button
-          style={styles.button}
-          onClick={handleRegister}
-          disabled={loading}
-        >
-          {loading ? "Creating account..." : "Register"}
+        <button className="btn btn-block" type="submit" disabled={loading}>
+          {loading ? "Creating account…" : "Register"}
         </button>
-      </div>
+
+        {onBack && (
+          <button type="button" className="btn btn-secondary btn-block" onClick={onBack}>
+            Back to sign in
+          </button>
+        )}
+      </form>
     </div>
   );
 }
 
 const styles = {
   page: {
-    minHeight: "100vh",
+    minHeight: "100dvh",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    background: "var(--bg)",
     padding: 16,
+    paddingTop: "calc(16px + var(--safe-top))",
+    paddingBottom: "calc(16px + var(--safe-bottom))",
   },
-  card: {
-    width: "100%",
-    maxWidth: 380,
-    background: "#fff",
-    borderRadius: 18,
-    padding: 24,
-    border: "1px solid var(--border)",
-  },
-  title: {
-    margin: 0,
-    marginBottom: 6,
-    textAlign: "center",
-  },
-  subtitle: {
-    marginTop: 0,
-    marginBottom: 20,
-    textAlign: "center",
-    fontSize: 14,
-    color: "var(--subtext)",
-  },
-  input: {
-    width: "100%",
-    padding: "12px 14px",
-    borderRadius: 12,
-    border: "1px solid var(--border)",
-    fontSize: 14,
-    marginBottom: 12,
-  },
-  hint: {
-    fontSize: 12,
-    color: "var(--subtext)",
-    textAlign: "center",
-    marginBottom: 12,
-    lineHeight: 1.6,
-  },
-  button: {
-    width: "100%",
-    padding: "12px 14px",
-    borderRadius: 12,
-    border: "none",
-    background: "var(--primary)",
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: 500,
-    marginTop: 8,
-  },
-  error: {
-    fontSize: 13,
-    color: "#ff3b30",
-    marginBottom: 8,
-    textAlign: "center",
-  },
+  card: { width: "100%", maxWidth: 380 },
+  title: { margin: 0, textAlign: "center" },
 };

@@ -1,5 +1,25 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { logout } from "../api/auth";
+import { api } from "../api/client";
+import {
+  disablePush,
+  enablePush,
+  isSubscribed,
+  isStandalone,
+  permission,
+  pushSupport,
+} from "../api/push";
+import { loadIdentity } from "../crypto/keystore";
+import { generateIdentity, wrapIdentity, isSupported } from "../crypto/e2ee";
+
+function Section({ title, children }) {
+  return (
+    <div className="card stack">
+      <div className="muted">{title}</div>
+      {children}
+    </div>
+  );
+}
 
 export default function Profile({ onLogout }) {
   const username = localStorage.getItem("username");
@@ -8,52 +28,47 @@ export default function Profile({ onLogout }) {
   const [oldPassword, setOldPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [message, setMessage] = useState("");
+  const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  function handleLogout() {
-    logout();
+  const [hasKey, setHasKey] = useState(false);
+  const [pushOn, setPushOn] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+
+  const support = pushSupport();
+
+  useEffect(() => {
+    loadIdentity(username).then((id) => setHasKey(Boolean(id)));
+    isSubscribed().then(setPushOn);
+  }, [username]);
+
+  function reset(msg) {
+    setMessage(msg);
+    setError("");
+  }
+
+  async function handleLogout() {
+    await logout();
     onLogout();
   }
 
   async function handleChangeUsername() {
     if (!newUsername.trim()) {
-      setMessage("Please enter a new username");
+      setError("Please enter a new username");
       return;
     }
 
     setLoading(true);
-    setMessage("");
-
-    const token = localStorage.getItem("token");
-
+    setError("");
     try {
-      const res = await fetch(
-        "/api/profile/username",
-        {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            new_username: newUsername.trim(),
-          }),
-        }
-      );
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setMessage(data.error || "Failed to update username");
-        setLoading(false);
-        return;
-      }
-
-      alert("Username updated. Please log in again.");
-      localStorage.clear();
+      await api.put("/api/profile/username", {
+        new_username: newUsername.trim(),
+      });
+      alert("Username updated. Please sign in again.");
+      await logout();
       onLogout();
-    } catch {
-      setMessage("Network error");
+    } catch (err) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
@@ -61,169 +76,176 @@ export default function Profile({ onLogout }) {
 
   async function handleChangePassword() {
     if (!oldPassword || !newPassword) {
-      setMessage("Please fill all password fields");
+      setError("Please fill both password fields");
       return;
     }
 
     setLoading(true);
-    setMessage("");
-
-    const token = localStorage.getItem("token");
+    setError("");
 
     try {
-      const res = await fetch(
-        "/api/profile/password",
-        {
-          method: "PUT",
-          headers: {
-            "Content-Type": "application/json",
-            Authorization: `Bearer ${token}`,
-          },
-          body: JSON.stringify({
-            old_password: oldPassword,
-            new_password: newPassword,
-          }),
+      // The identity private key is wrapped with the old password, so it has
+      // to be re-wrapped under the new one in the same request or the user
+      // loses access to their encrypted chats.
+      let keys;
+      if (isSupported()) {
+        try {
+          const stored = await loadIdentity(username);
+          if (stored) {
+            // The cached key is non-extractable by design, so mint a fresh
+            // identity rather than trying to re-wrap the old one. Previously
+            // encrypted messages stay readable only on devices still holding
+            // the old key, which is why this is called out below.
+            keys = await wrapIdentity(await generateIdentity(), newPassword);
+          }
+        } catch {
+          keys = undefined;
         }
-      );
-
-      const data = await res.json();
-
-      if (!res.ok) {
-        setMessage(data.error || "Failed to update password");
-        setLoading(false);
-        return;
       }
 
-      setMessage("Password updated successfully");
-      setOldPassword("");
-      setNewPassword("");
-    } catch {
-      setMessage("Network error");
+      await api.put("/api/profile/password", {
+        old_password: oldPassword,
+        new_password: newPassword,
+        keys,
+      });
+
+      alert("Password updated. Please sign in again.");
+      await logout();
+      onLogout();
+    } catch (err) {
+      setError(err.message);
     } finally {
       setLoading(false);
     }
   }
 
+  async function togglePush() {
+    setPushBusy(true);
+    setError("");
+    try {
+      if (pushOn) {
+        await disablePush();
+        setPushOn(false);
+        reset("Notifications turned off");
+      } else {
+        await enablePush();
+        setPushOn(true);
+        reset("Notifications turned on");
+      }
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setPushBusy(false);
+    }
+  }
+
   return (
-    <div style={styles.page}>
-      <h2>Profile</h2>
+    <div className="container stack">
+      <h2 style={{ margin: 0 }}>Profile</h2>
 
-      {/* Current username */}
-      <div style={styles.card}>
-        <div style={styles.label}>نام کاربری</div>
-        <div style={styles.value}>{username}</div>
-      </div>
+      <Section title="نام کاربری">
+        <div style={{ fontSize: 16, fontWeight: 500 }}>{username}</div>
+      </Section>
 
-      {/* Change username */}
-      <div style={styles.card}>
-        <div style={styles.label}>تغییر نام کاربری</div>
+      <Section title="🔔 Notifications">
+        {support.supported ? (
+          <>
+            <button
+              className={`btn btn-block ${pushOn ? "btn-secondary" : ""}`}
+              onClick={togglePush}
+              disabled={pushBusy}
+            >
+              {pushBusy
+                ? "…"
+                : pushOn
+                ? "Turn off notifications"
+                : "Turn on notifications"}
+            </button>
+
+            {permission() === "denied" && (
+              <div className="muted">
+                Notifications are blocked in your browser settings for this
+                site. You will need to allow them there first.
+              </div>
+            )}
+          </>
+        ) : (
+          <div className="muted">{support.reason}</div>
+        )}
+
+        {!isStandalone() && (
+          <div className="muted">
+            Tip: install Chatters to your Home Screen for reliable notifications
+            and a full-screen app.
+          </div>
+        )}
+      </Section>
+
+      <Section title="🔒 Encryption">
+        <div style={{ fontSize: 14 }}>
+          {hasKey
+            ? "Your encryption key is unlocked on this device. Secure chats will open normally."
+            : "No encryption key is available on this device. Sign out and back in to unlock secure chats."}
+        </div>
+        <div className="muted">
+          Secure chats are encrypted in your browser. Nobody else — including
+          the server and administrators — can read them.
+        </div>
+      </Section>
+
+      <Section title="تغییر نام کاربری">
         <input
-          style={styles.input}
+          className="field"
           placeholder="نام کاربری جدید"
           value={newUsername}
-          onChange={e => setNewUsername(e.target.value)}
+          onChange={(e) => setNewUsername(e.target.value)}
         />
         <button
-          style={styles.button}
+          className="btn btn-block"
           onClick={handleChangeUsername}
           disabled={loading}
         >
           بروزرسانی نام کاربری
         </button>
-      </div>
+      </Section>
 
-      {/* Change password */}
-      <div style={styles.card}>
-        <div style={styles.label}>تغییر رمز عبور</div>
-
+      <Section title="تغییر رمز عبور">
         <input
+          className="field"
           type="password"
-          style={styles.input}
-          placeholder= "رمز عبور قدیم"
+          autoComplete="current-password"
+          placeholder="رمز عبور قدیم"
           value={oldPassword}
-          onChange={e => setOldPassword(e.target.value)}
+          onChange={(e) => setOldPassword(e.target.value)}
         />
-
         <input
+          className="field"
           type="password"
-          style={styles.input}
-          placeholder="رمز عبور جدید"
+          autoComplete="new-password"
+          placeholder="رمز عبور جدید (حداقل ۸ کاراکتر)"
           value={newPassword}
-          onChange={e => setNewPassword(e.target.value)}
+          onChange={(e) => setNewPassword(e.target.value)}
         />
-
+        <div className="muted">
+          Changing your password issues a new encryption key. Messages in
+          existing secure chats stay readable only where your old key is still
+          stored.
+        </div>
         <button
-          style={styles.button}
+          className="btn btn-block"
           onClick={handleChangePassword}
           disabled={loading}
         >
           بروزرسانی رمز عبور
         </button>
-      </div>
+      </Section>
 
-      {message && <p style={styles.message}>{message}</p>}
+      {error && <div className="error-text">{error}</div>}
+      {message && <div className="muted">{message}</div>}
 
-      <button style={styles.logout} onClick={handleLogout}>
+      <button className="btn btn-danger btn-block" onClick={handleLogout}>
         خروج
       </button>
     </div>
   );
 }
-
-const styles = {
-  page: {
-    padding: 16,
-    maxWidth: 520,
-    margin: "0 auto",
-  },
-  card: {
-    background: "#fff",
-    borderRadius: 14,
-    border: "1px solid var(--border)",
-    padding: 14,
-    marginBottom: 12,
-  },
-  label: {
-    fontSize: 13,
-    color: "var(--subtext)",
-    marginBottom: 6,
-  },
-  value: {
-    fontSize: 15,
-    fontWeight: 500,
-  },
-  input: {
-    width: "100%",
-    padding: 10,
-    borderRadius: 10,
-    border: "1px solid var(--border)",
-    marginBottom: 8,
-    fontSize: 14,
-  },
-  button: {
-    padding: 10,
-    width: "100%",
-    borderRadius: 10,
-    border: "none",
-    background: "var(--primary)",
-    color: "#fff",
-    fontSize: 14,
-    opacity: 1,
-  },
-  logout: {
-    marginTop: 20,
-    padding: 12,
-    width: "100%",
-    borderRadius: 12,
-    border: "none",
-    background: "#ff3b30",
-    color: "#fff",
-    fontSize: 15,
-  },
-  message: {
-    fontSize: 13,
-    color: "var(--subtext)",
-    textAlign: "center",
-    marginTop: 8,
-  },
-};

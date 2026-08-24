@@ -1,0 +1,74 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-chatters}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
+      POSTGRES_DB: ${POSTGRES_DB:-messenger}
+    volumes:
+      # The schema is created and kept up to date by the backend's migrations
+      # on every boot, so there is no init script to fall out of sync with.
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-chatters} -d ${POSTGRES_DB:-messenger}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./Chatters
+    restart: unless-stopped
+    environment:
+      DB_HOST: db
+      DB_PORT: 5432
+      DB_USER: ${POSTGRES_USER:-chatters}
+      DB_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
+      DB_NAME: ${POSTGRES_DB:-messenger}
+      DB_SSLMODE: disable
+
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set - run "make env" then edit .env}
+      GIN_MODE: release
+      PORT: 8080
+
+      # Extra browser origins allowed to call the API. Same-origin requests are
+      # always permitted, so this is only needed for a split-domain setup.
+      ALLOWED_ORIGINS: ${ALLOWED_ORIGINS:-}
+
+      MAX_UPLOAD_BYTES: ${MAX_UPLOAD_BYTES:-20971520}
+
+      # Web Push. Generate with: make vapid
+      VAPID_PUBLIC_KEY: ${VAPID_PUBLIC_KEY:-}
+      VAPID_PRIVATE_KEY: ${VAPID_PRIVATE_KEY:-}
+      VAPID_SUBJECT: ${VAPID_SUBJECT:-mailto:admin@example.com}
+
+      # Creates (or promotes) this administrator on boot. Idempotent: an
+      # existing account is promoted, never overwritten.
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+    volumes:
+      - uploads:/app/private_uploads
+    healthcheck:
+      test: ["CMD", "/app/chatters-server", "-healthcheck"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    depends_on:
+      db:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    restart: unless-stopped
+    ports:
+      - "${HTTP_PORT:-80}:80"
+    depends_on:
+      - backend
+
+volumes:
+  db_data:
+  uploads:
