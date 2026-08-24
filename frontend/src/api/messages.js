@@ -1,18 +1,6 @@
-export async function getMessages(chatId) {
-  const token = localStorage.getItem("token");
+import { api } from "./client";
 
-  const res = await fetch(
-    `/api/chats/${chatId}/messages`,
-    {
-      headers: {
-        Authorization: `Bearer ${token}`
-      }
-    }
-  );
-
-  if (!res.ok) {
-    throw new Error("Failed to load messages");
-  }
-
-  return res.json();
+export function getMessages(chatId, limit) {
+  const query = limit ? `?limit=${encodeURIComponent(limit)}` : "";
+  return api.get(`/api/chats/${encodeURIComponent(chatId)}/messages${query}`);
 }

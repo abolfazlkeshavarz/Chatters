@@ -1,27 +1,37 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="fa" dir="rtl">
   <head>
     <meta charset="utf-8" />
-    
-    <!-- Favicon (using PNG instead of ICO) -->
+
     <link rel="icon" type="image/png" href="%PUBLIC_URL%/favicon.png" />
-    
-    <!-- For Apple iOS devices -->
     <link rel="apple-touch-icon" href="%PUBLIC_URL%/logo192.png" />
-    
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <meta name="theme-color" content="#000000" />
-    
-    <!-- Update description if needed -->
+
+    <!--
+      viewport-fit=cover lets the layout extend under the iPhone notch and home
+      indicator; the CSS then pads content back with env(safe-area-inset-*).
+      maximum-scale is intentionally omitted: capping zoom breaks accessibility
+      for anyone who needs to enlarge text.
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, viewport-fit=cover"
+    />
+
+    <meta name="theme-color" content="#007aff" />
+    <meta name="color-scheme" content="light dark" />
     <meta
       name="description"
-      content="Your updated app description"
+      content="Chatters — private messaging with optional end-to-end encryption"
     />
-    
-    <!-- UPDATE TITLE HERE -->
+
+    <!-- iOS standalone PWA: required for Home Screen install and Web Push -->
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="Chatters" />
+    <meta name="mobile-web-app-capable" content="yes" />
+
     <title>Chatters</title>
-    
-    <!-- Manifest -->
+
     <link rel="manifest" href="%PUBLIC_URL%/manifest.json" />
   </head>
   <body>

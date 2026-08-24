@@ -29,6 +29,38 @@
   --text: #1c1c1e;
   --subtext: #6e6e73;
   --primary: #007aff;
+  --primary-contrast: #ffffff;
+  --danger: #ff3b30;
+  --success: #34c759;
+  --unread-bg: #eef3ff;
+  --bubble-in: #e5e5ea;
+  --bubble-in-text: #000000;
+  --overlay: rgba(0, 0, 0, 0.45);
+  --secure: #30b06a;
+
+  /* Notch / home-indicator padding; resolves to 0 where unsupported. */
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+
+  --header-h: 56px;
+  --radius: 14px;
+  --max-content: 1100px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #000000;
+    --card: #1c1c1e;
+    --border: #38383a;
+    --text: #f2f2f7;
+    --subtext: #98989f;
+    --unread-bg: #16233a;
+    --bubble-in: #2c2c2e;
+    --bubble-in-text: #f2f2f7;
+    --overlay: rgba(0, 0, 0, 0.7);
+  }
 }
 
 * {
@@ -39,6 +71,15 @@ html,
 body,
 #root {
   height: 100%;
+}
+
+/*
+  100dvh instead of 100vh: on mobile browsers 100vh includes the collapsing
+  address bar, so a full-height flex column pushed the message input off the
+  bottom of the screen. dvh tracks the actually-visible viewport.
+*/
+#root {
+  min-height: 100dvh;
 }
 
 body {
@@ -59,18 +100,321 @@ body {
 
   -webkit-font-smoothing: antialiased;
   -webkit-text-size-adjust: 100%;
+  /* Stop the whole page rubber-banding on iOS; panes scroll individually. */
+  overscroll-behavior-y: none;
 }
 
-/* Buttons */
 button {
   font-family: inherit;
+  color: inherit;
   cursor: pointer;
-  touch-action: manipulation; /* mobile tap optimization */
+  touch-action: manipulation;
+  border: none;
+  background: none;
 }
 
-/* Inputs – IMPORTANT for mobile (prevents iOS zoom) */
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+/* 16px minimum stops iOS Safari zooming in when a field is focused. */
 input,
-textarea {
+textarea,
+select {
   font-family: inherit;
   font-size: 16px;
+  color: var(--text);
+  background: var(--card);
+  border: 1px solid var(--border);
+}
+
+input:focus-visible,
+textarea:focus-visible,
+button:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
+}
+
+/* ---------------------------------------------------------------- layout */
+
+.app-shell {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  padding-left: var(--safe-left);
+  padding-right: var(--safe-right);
+}
+
+/*
+  Does not scroll itself: the pane inside owns its scrolling, so a chat's
+  message list scrolls independently of its sticky header and composer.
+  Full-page views wrap their own content in .scroll-area.
+*/
+.app-content {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.pane {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+.scroll-area {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+}
+
+.container {
+  width: 100%;
+  max-width: var(--max-content);
+  margin: 0 auto;
+  padding: 16px;
+}
+
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Bottom tab bar, lifted clear of the iPhone home indicator. */
+.tabbar {
+  display: flex;
+  border-top: 1px solid var(--border);
+  background: var(--card);
+  padding-bottom: var(--safe-bottom);
+  flex-shrink: 0;
+}
+
+.tabbar button {
+  flex: 1;
+  padding: 12px 8px;
+  font-size: 13px;
+  min-height: 48px; /* comfortable touch target */
+  color: var(--subtext);
+}
+
+.tabbar button[aria-current="page"] {
+  background: var(--unread-bg);
+  color: var(--primary);
+  font-weight: 500;
+}
+
+.app-header {
+  min-height: var(--header-h);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  padding-top: calc(8px + var(--safe-top));
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+  flex-shrink: 0;
+}
+
+/* ------------------------------------------------------------ components */
+
+.card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 14px;
+}
+
+.field {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border);
+}
+
+.btn {
+  padding: 12px 16px;
+  border-radius: 12px;
+  background: var(--primary);
+  color: var(--primary-contrast);
+  font-size: 15px;
+  font-weight: 500;
+  min-height: 44px;
+}
+
+.btn-secondary {
+  background: var(--card);
+  color: var(--primary);
+  border: 1px solid var(--border);
+}
+
+.btn-danger {
+  background: var(--danger);
+  color: #fff;
+}
+
+.btn-block {
+  width: 100%;
+}
+
+.badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--unread-bg);
+  color: var(--primary);
+  font-weight: 500;
+}
+
+.badge-secure {
+  background: rgba(48, 176, 106, 0.15);
+  color: var(--secure);
+}
+
+.error-text {
+  color: var(--danger);
+  font-size: 13px;
+}
+
+.muted {
+  color: var(--subtext);
+  font-size: 13px;
+}
+
+/* Connection status strip shown while the socket is down. */
+.conn-banner {
+  padding: 6px 12px;
+  text-align: center;
+  font-size: 12px;
+  background: #ffcc00;
+  color: #3a2f00;
+  flex-shrink: 0;
+}
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--overlay);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 16px;
+  padding-top: calc(16px + var(--safe-top));
+  padding-bottom: calc(16px + var(--safe-bottom));
+  z-index: 1000;
+}
+
+.modal {
+  background: var(--card);
+  border-radius: 18px;
+  width: 100%;
+  max-width: 460px;
+  max-height: 100%;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Tables scroll sideways on small screens rather than breaking the layout. */
+.table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+th,
+td {
+  text-align: start;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+th {
+  color: var(--subtext);
+  font-weight: 500;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+/* ---------------------------------------------------------- breakpoints */
+
+/* Phones: keep the grid single-column and the type compact. */
+@media (max-width: 599px) {
+  .container {
+    padding: 12px;
+  }
+  .hide-sm {
+    display: none !important;
+  }
+}
+
+/* Tablets and up: roomier chrome. */
+@media (min-width: 600px) {
+  :root {
+    --header-h: 60px;
+  }
+}
+
+/*
+  Desktop: the chat list and the open conversation sit side by side instead of
+  replacing one another, which is what the mobile-only markup used to do.
+*/
+@media (min-width: 900px) {
+  .split {
+    display: grid;
+    grid-template-columns: minmax(280px, 340px) 1fr;
+    height: 100%;
+    min-height: 0;
+  }
+
+  .split > .split-side {
+    border-inline-end: 1px solid var(--border);
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .split > .split-main {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+
+  /* Navigation lives in the sidebar on desktop. */
+  .tabbar {
+    padding-bottom: 0;
+  }
+
+  .hide-lg {
+    display: none !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

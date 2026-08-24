@@ -1,114 +1,174 @@
 package handlers
 
 import (
-    "fmt"
-    "net/http"
-    "os"
-    "path/filepath"
-    "time"
+	"fmt"
+	"net/http"
+	"os"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"time"
 
-    "messenger/internal/db"
-    "messenger/internal/websocket"
+	"messenger/internal/config"
+	"messenger/internal/db"
+	"messenger/internal/push"
+	"messenger/internal/websocket"
 
-    "github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 )
 
+// Anything outside this set is replaced, so a crafted upload name cannot
+// introduce path separators, traversal sequences, or control characters.
+var unsafeFilenameChars = regexp.MustCompile(`[^A-Za-z0-9._-]`)
+
+// sanitizeFilename reduces an attacker-controlled upload name to a single safe
+// path component. filepath.Base alone is not enough on its own: a name like
+// "x_../../etc/passwd" survives Base() intact on some inputs and is then
+// re-joined, so we also strip every separator character outright.
+func sanitizeFilename(name string) string {
+	name = filepath.Base(strings.ReplaceAll(name, `\`, "/"))
+	name = unsafeFilenameChars.ReplaceAllString(name, "_")
+	name = strings.TrimLeft(name, ".")
+
+	if name == "" {
+		name = "file"
+	}
+	if len(name) > 120 {
+		name = name[len(name)-120:]
+	}
+	return name
+}
+
 func UploadMedia(c *gin.Context) {
-    userID := c.GetString("user_id")
-    chatID := c.PostForm("chat_id")
+	userID := c.GetString("user_id")
+	chatID := c.PostForm("chat_id")
 
-    // 🔒 Check chat membership
-    var ok bool
-    err := db.DB.QueryRow(
-        `SELECT EXISTS (
-            SELECT 1 FROM chat_members
-            WHERE chat_id = $1 AND user_id = $2
-        )`,
-        chatID, userID,
-    ).Scan(&ok)
+	// Validate before it reaches the filesystem: chat ids become directory
+	// names, so a non-UUID value must never get that far.
+	if _, err := uuid.Parse(chatID); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid chat id"})
+		return
+	}
 
-    if err != nil || !ok {
-        c.JSON(http.StatusForbidden, gin.H{"error": "not a chat member"})
-        return
-    }
+	if !isChatMember(chatID, userID) {
+		c.JSON(http.StatusForbidden, gin.H{"error": "not a chat member"})
+		return
+	}
 
-    file, err := c.FormFile("file")
-    if err != nil {
-        c.JSON(400, gin.H{"error": "file required"})
-        return
-    }
+	// Reject oversized bodies before buffering them to disk.
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.C.MaxUploadBytes)
 
-    dir := filepath.Join("private_uploads", chatID)
-    _ = os.MkdirAll(dir, 0700)
+	file, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "file required"})
+		return
+	}
+	if file.Size > config.C.MaxUploadBytes {
+		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "file is too large"})
+		return
+	}
 
-    filename := fmt.Sprintf("%d_%s", time.Now().UnixNano(), file.Filename)
-    path := filepath.Join(dir, filename)
+	originalName := sanitizeFilename(file.Filename)
 
-    if err := c.SaveUploadedFile(file, path); err != nil {
-        c.JSON(500, gin.H{"error": "failed to save file"})
-        return
-    }
+	dir := filepath.Join(config.C.UploadDir, chatID)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to prepare upload directory"})
+		return
+	}
 
-    mimeType := file.Header.Get("Content-Type")
-    
-    // Start transaction
-    tx, err := db.DB.Begin()
-    if err != nil {
-        c.JSON(500, gin.H{"error": "db error"})
-        return
-    }
-    defer tx.Rollback()
+	storedName := fmt.Sprintf("%d_%s", time.Now().UnixNano(), originalName)
+	path := filepath.Join(dir, storedName)
 
-    // 1️⃣ Insert into messages table (for chat history)
-    var messageID int
-    var createdAt string
-    err = tx.QueryRow(
-        `INSERT INTO messages (chat_id, sender_id, content, type, file_path, filename, mime_type)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
-         RETURNING id, created_at`,
-        chatID,
-        userID,
-        filename, // content will be filename for media
-        "media",  // type = 'media' instead of 'text'
-        path,
-        file.Filename,
-        mimeType,
-    ).Scan(&messageID, &createdAt)
+	// Belt and braces: confirm the final path really is inside the upload root.
+	if !withinUploadDir(path) {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid file path"})
+		return
+	}
 
-    if err != nil {
-        c.JSON(500, gin.H{"error": "failed to save message: " + err.Error()})
-        return
-    }
+	if err := c.SaveUploadedFile(file, path); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save file"})
+		return
+	}
 
-    // 2️⃣ Also insert into media_messages table for download tracking
-    _, err = tx.Exec(
-        `INSERT INTO media_messages (id, chat_id, sender_id, file_path, mime_type)
-         VALUES ($1, $2, $3, $4, $5)`,
-        messageID,  // Use same ID as messages table
-        chatID,
-        userID,
-        path,
-        mimeType,
-    )
+	mimeType := file.Header.Get("Content-Type")
+	if mimeType == "" {
+		mimeType = "application/octet-stream"
+	}
 
-    if err != nil {
-        c.JSON(500, gin.H{"error": "db error: " + err.Error()})
-        return
-    }
+	tx, err := db.DB.Begin()
+	if err != nil {
+		_ = os.Remove(path)
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+		return
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+			_ = os.Remove(path)
+		}
+	}()
 
-    if err = tx.Commit(); err != nil {
-        c.JSON(500, gin.H{"error": "commit failed: " + err.Error()})
-        return
-    }
+	var messageID int
+	var createdAt time.Time
+	err = tx.QueryRow(
+		`INSERT INTO messages (chat_id, sender_id, content, type, file_path, filename, mime_type)
+		 VALUES ($1, $2, $3, 'media', $4, $5, $6)
+		 RETURNING id, created_at`,
+		chatID, userID, originalName, path, originalName, mimeType,
+	).Scan(&messageID, &createdAt)
 
-    // 🔔 Broadcast media message
-    websocket.GlobalHub.BroadcastMedia(
-        chatID,
-        messageID,
-        file.Filename,
-        userID,
-        createdAt,
-    )
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save message"})
+		return
+	}
 
-    c.JSON(200, gin.H{"message_id": messageID})
+	_, err = tx.Exec(
+		`INSERT INTO media_messages (id, chat_id, sender_id, file_path, mime_type)
+		 VALUES ($1, $2, $3, $4, $5)`,
+		messageID, chatID, userID, path, mimeType,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
+		return
+	}
+
+	if err = tx.Commit(); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "commit failed"})
+		return
+	}
+	committed = true
+
+	websocket.GlobalHub.BroadcastMedia(
+		chatID, messageID, originalName, mimeType, userID, createdAt.Format(time.RFC3339Nano),
+	)
+
+	notifyChat(chatID, userID, push.Notification{
+		Type:   "media",
+		Title:  userID,
+		Body:   "📎 " + originalName,
+		ChatID: chatID,
+		From:   userID,
+	})
+
+	c.JSON(http.StatusOK, gin.H{"message_id": messageID})
+}
+
+// withinUploadDir guards against a stored path escaping the upload root,
+// whether through a crafted name or a legacy database row.
+func withinUploadDir(path string) bool {
+	root, err := filepath.Abs(config.C.UploadDir)
+	if err != nil {
+		return false
+	}
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return false
+	}
+	rel, err := filepath.Rel(root, abs)
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(os.PathSeparator))
 }

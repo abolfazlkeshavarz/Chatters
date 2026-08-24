@@ -1,71 +1,67 @@
 package handlers
 
 import (
-    "net/http"
+	"net/http"
+	"os"
+	"strconv"
 
-    "messenger/internal/db"
+	"messenger/internal/db"
 
-    "github.com/gin-gonic/gin"
+	"github.com/gin-gonic/gin"
 )
 
 func DownloadMedia(c *gin.Context) {
-    userID := c.GetString("user_id")
-    mediaID := c.Param("id")
+	userID := c.GetString("user_id")
 
-    var path, chatID, filename, mimeType string
-    var downloaded bool
+	mediaID, err := strconv.Atoi(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid media id"})
+		return
+	}
 
-    // Try to get from media_messages first (for backward compatibility)
-    err := db.DB.QueryRow(
-        `SELECT m.file_path, m.chat_id, m.downloaded, msg.filename, msg.mime_type
-         FROM media_messages m
-         JOIN messages msg ON msg.id = m.id
-         WHERE m.id = $1`,
-        mediaID,
-    ).Scan(&path, &chatID, &downloaded, &filename, &mimeType)
+	var path, chatID, filename, mimeType string
 
-    if err != nil {
-        // If not found in media_messages, try messages table directly
-        err = db.DB.QueryRow(
-            `SELECT file_path, chat_id, filename, mime_type
-             FROM messages
-             WHERE id = $1 AND type = 'media'`,
-            mediaID,
-        ).Scan(&path, &chatID, &filename, &mimeType)
-        
-        if err != nil {
-            c.JSON(http.StatusNotFound, gin.H{"error": "media not found"})
-            return
-        }
-    }
+	// Authorisation is enforced in the query itself: the row only comes back
+	// if the caller is a member of the chat it belongs to, so there is no
+	// window where we hold a path we are not allowed to serve.
+	err = db.DB.QueryRow(
+		`SELECT m.file_path, m.chat_id::text, COALESCE(m.filename, 'file'), COALESCE(m.mime_type, 'application/octet-stream')
+		 FROM messages m
+		 WHERE m.id = $1
+		   AND m.type = 'media'
+		   AND m.file_path IS NOT NULL
+		   AND EXISTS (
+		     SELECT 1 FROM chat_members cm
+		     WHERE cm.chat_id = m.chat_id AND cm.user_id = $2
+		   )`,
+		mediaID, userID,
+	).Scan(&path, &chatID, &filename, &mimeType)
 
-    // 🔒 Check membership
-    var ok bool
-    db.DB.QueryRow(
-        `SELECT EXISTS (
-            SELECT 1 FROM chat_members
-            WHERE chat_id = $1 AND user_id = $2
-        )`,
-        chatID, userID,
-    ).Scan(&ok)
+	if err != nil {
+		// Deliberately identical for "does not exist" and "not yours" so the
+		// endpoint cannot be used to probe which message ids are real.
+		c.JSON(http.StatusNotFound, gin.H{"error": "media not found"})
+		return
+	}
 
-    if !ok {
-        c.JSON(http.StatusForbidden, gin.H{"error": "forbidden"})
-        return
-    }
+	// Defence in depth against a legacy or tampered row pointing outside the
+	// upload root.
+	if !withinUploadDir(path) {
+		c.JSON(http.StatusNotFound, gin.H{"error": "media not found"})
+		return
+	}
+	if _, err := os.Stat(path); err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "media not found"})
+		return
+	}
 
-    // Set proper headers
-    c.Header("Content-Disposition", "attachment; filename="+filename)
-    c.Header("Content-Type", mimeType)
-    
-    // 📤 Send file
-    c.File(path)
+	go func() {
+		_, _ = db.DB.Exec(`UPDATE media_messages SET downloaded = true WHERE id = $1`, mediaID)
+	}()
 
-    // Update download status if exists in media_messages table
-    go func() {
-        _, _ = db.DB.Exec(
-            `UPDATE media_messages SET downloaded = true WHERE id = $1`,
-            mediaID,
-        )
-    }()
+	c.Header("Content-Type", mimeType)
+	c.Header("X-Content-Type-Options", "nosniff")
+	// FileAttachment quotes and escapes the filename for us, which prevents a
+	// crafted name from injecting extra response headers.
+	c.FileAttachment(path, filename)
 }

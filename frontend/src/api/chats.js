@@ -1,39 +1,38 @@
-export async function getChats() {
-  const token = localStorage.getItem("token");
+import { api } from "./client";
 
-  const res = await fetch("/api/chats", {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
-  });
-
-  if (!res.ok) {
-    throw new Error("Failed to load chats");
-  }
-
-  return res.json();
+export function getChats() {
+  return api.get("/api/chats");
 }
 
-export async function createChat(members, isGroup) {
-  const token = localStorage.getItem("token");
-
-  const res = await fetch("/api/chats", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      members,
-      is_group: isGroup,
-    }),
+/**
+ * The group name was previously accepted by callers but never sent, so every
+ * group fell back to the server's auto-generated title.
+ */
+export function createChat(members, isGroup, name) {
+  return api.post("/api/chats", {
+    members,
+    is_group: Boolean(isGroup),
+    name: name || "",
   });
+}
 
-  const data = await res.json();
+export function getChatMembers(chatId) {
+  return api.get(`/api/chats/${encodeURIComponent(chatId)}/members`);
+}
 
-  if (!res.ok) {
-    throw new Error(data.error || "Failed to create chat");
-  }
+export function addMember(chatId, userId) {
+  return api.post(`/api/chats/${encodeURIComponent(chatId)}/members`, {
+    user_id: userId,
+  });
+}
 
-  return data;
+/** Public keys of every member, for encrypting a message to the whole chat. */
+export function getChatKeys(chatId) {
+  return api.get(`/api/chats/${encodeURIComponent(chatId)}/keys`);
+}
+
+export function enableE2E(chatId) {
+  return api.put(`/api/chats/${encodeURIComponent(chatId)}/e2e`, {
+    enabled: true,
+  });
 }

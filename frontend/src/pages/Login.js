@@ -7,7 +7,9 @@ export default function Login({ onLogin, onRegister }) {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  async function handleLogin() {
+  async function handleLogin(e) {
+    e?.preventDefault();
+
     if (!identifier || !password) {
       setError("فیلدا رو پر کن");
       return;
@@ -20,7 +22,7 @@ export default function Login({ onLogin, onRegister }) {
       await login(identifier, password);
       onLogin();
     } catch (err) {
-      setError("نام کاربری یا رمز ورود اشتباهه ");
+      setError(err.message || "نام کاربری یا رمز ورود اشتباهه");
     } finally {
       setLoading(false);
     }
@@ -28,114 +30,58 @@ export default function Login({ onLogin, onRegister }) {
 
   return (
     <div style={styles.page}>
-      <div style={styles.card}>
+      {/* A real form so password managers and the Enter key both work. */}
+      <form style={styles.card} className="card stack" onSubmit={handleLogin}>
         <h2 style={styles.title}>Chatters</h2>
-        <p style={styles.subtitle}>
-         .ظرفیت ها پر شد
-        </p>
 
         <input
-          style={styles.input}
-          placeholder="نام کاربری(حساس به کوچیک بزرگ بودن حروف)"
+          className="field"
+          placeholder="نام کاربری یا ایمیل"
+          autoComplete="username"
+          autoCapitalize="none"
           value={identifier}
-          onChange={e => setIdentifier(e.target.value)}
+          onChange={(e) => setIdentifier(e.target.value)}
         />
 
         <input
+          className="field"
           type="password"
-          style={styles.input}
           placeholder="رمز عبور"
+          autoComplete="current-password"
           value={password}
-          onChange={e => setPassword(e.target.value)}
+          onChange={(e) => setPassword(e.target.value)}
         />
 
-        {error && <div style={styles.error}>{error}</div>}
+        {error && <div className="error-text" style={{ textAlign: "center" }}>{error}</div>}
 
-        <button
-          style={styles.button}
-          onClick={handleLogin}
-          disabled={loading}
-        >
+        <button className="btn btn-block" type="submit" disabled={loading}>
           {loading ? "...درحال ورود" : "ورود"}
         </button>
 
-
-      </div>
+        {onRegister && (
+          <button
+            type="button"
+            className="btn btn-secondary btn-block"
+            onClick={onRegister}
+          >
+            ساخت حساب جدید
+          </button>
+        )}
+      </form>
     </div>
   );
 }
 
 const styles = {
   page: {
-    minHeight: "100vh",
+    minHeight: "100dvh",
     display: "flex",
     alignItems: "center",
     justifyContent: "center",
-    background: "var(--bg)",
     padding: 16,
+    paddingTop: "calc(16px + var(--safe-top))",
+    paddingBottom: "calc(16px + var(--safe-bottom))",
   },
-  card: {
-    width: "100%",
-    maxWidth: 380,
-    background: "#fff",
-    borderRadius: 18,
-    padding: 24,
-    border: "1px solid var(--border)",
-  },
-  title: {
-    margin: 0,
-    marginBottom: 6,
-    textAlign: "center",
-  },
-  subtitle: {
-    marginTop: 0,
-    marginBottom: 20,
-    textAlign: "center",
-    fontSize: 14,
-    color: "var(--subtext)",
-  },
-  input: {
-    width: "100%",
-    padding: "12px 14px",
-    borderRadius: 12,
-    border: "1px solid var(--border)",
-    fontSize: 14,
-    marginBottom: 12,
-  },
-  button: {
-    width: "100%",
-    padding: "12px 14px",
-    borderRadius: 12,
-    border: "none",
-    background: "var(--primary)",
-    color: "#fff",
-    fontSize: 15,
-    fontWeight: 500,
-    marginTop: 8,
-  },
-  error: {
-    fontSize: 13,
-    color: "#ff3b30",
-    marginBottom: 8,
-    textAlign: "center",
-  },
-  divider: {
-  marginTop: 16,
-  marginBottom: 8,
-  fontSize: 13,
-  color: "var(--subtext)",
-  textAlign: "center",
-  },
-
-  secondary: {
-    width: "100%",
-    padding: "10px",
-    borderRadius: 12,
-    border: "1px solid var(--border)",
-    background: "#fff",
-    color: "var(--primary)",
-    fontSize: 14,
-    fontWeight: 500,
-  },
-
+  card: { width: "100%", maxWidth: 380 },
+  title: { margin: 0, textAlign: "center" },
 };
