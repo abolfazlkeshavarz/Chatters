@@ -212,6 +212,8 @@ async function decryptWith(msg, privateKey) {
 
 /* -------------------------------------------------------------- websocket */
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function openSocket(token) {
   const { data } = await api("/api/ws-ticket", { method: "POST", token, expect: 200 });
   const url = BASE.replace(/^http/, "ws") + `/api/ws?ticket=${encodeURIComponent(data.ticket)}`;
@@ -555,6 +557,94 @@ await check("the heartbeat is answered", async () => {
   aliceSock.send({ type: "ping" });
   const pong = await aliceSock.wait((m) => m.type === "pong", 3000);
   assert(pong, "no pong received");
+});
+
+section("Delivery state: sent -> delivered -> seen");
+
+// The three states drive the bubble colour (white / blue / green), so each
+// transition is checked against the API rather than the UI.
+
+async function statusOf(id) {
+  const { data } = await api(`/api/chats/${chatId}/messages`, {
+    token: aliceToken,
+    expect: 200,
+  });
+  return (data.find((m) => m.id === id) || {}).status;
+}
+
+await check("a message to an offline recipient stays 'sent'", async () => {
+  bobSock.close();
+  await sleep(300); // let the hub observe the disconnect
+
+  const body = `offline delivery probe ${stamp}`;
+  aliceSock.send({ chat_id: chatId, content: body });
+
+  const echoed = await aliceSock.wait((m) => m.type === "message" && m.content === body);
+  assertEqual(echoed.status, "sent", "status while the recipient is offline");
+});
+
+await check("coming online promotes it to 'delivered', not 'seen'", async () => {
+  const body = `delivery promotion probe ${stamp}`;
+  aliceSock.send({ chat_id: chatId, content: body });
+  const echoed = await aliceSock.wait((m) => m.type === "message" && m.content === body);
+  assertEqual(echoed.status, "sent", "should start out merely sent");
+
+  // Bob reconnects but never opens the chat.
+  bobSock = await openSocket(bobToken);
+
+  const update = await aliceSock.wait(
+    (m) => m.type === "status" && (m.message_ids || []).includes(echoed.id)
+  );
+  assertEqual(update.status, "delivered", "status after the recipient connects");
+
+  // The crucial distinction: connected is not the same as read.
+  assertEqual(await statusOf(echoed.id), "delivered", "persisted status");
+});
+
+await check("a message sent to an already-online recipient is 'delivered'", async () => {
+  const body = `online delivery probe ${stamp}`;
+  aliceSock.send({ chat_id: chatId, content: body });
+
+  const echoed = await aliceSock.wait((m) => m.type === "message" && m.content === body);
+  assertEqual(echoed.status, "delivered", "status with the recipient connected");
+});
+
+await check("opening the chat promotes it to 'seen'", async () => {
+  const body = `read receipt probe ${stamp}`;
+  aliceSock.send({ chat_id: chatId, content: body });
+  const echoed = await aliceSock.wait((m) => m.type === "message" && m.content === body);
+
+  // Bob opens the conversation.
+  bobSock.send({ type: "seen", chat_id: chatId });
+
+  const update = await aliceSock.wait(
+    (m) =>
+      m.type === "status" &&
+      m.status === "seen" &&
+      (m.message_ids || []).includes(echoed.id)
+  );
+  assert(update, "no read receipt arrived");
+  assertEqual(await statusOf(echoed.id), "seen", "persisted status");
+});
+
+await check("delivery state never moves backwards", async () => {
+  const body = `monotonic probe ${stamp}`;
+  aliceSock.send({ chat_id: chatId, content: body });
+  const echoed = await aliceSock.wait((m) => m.type === "message" && m.content === body);
+
+  bobSock.send({ type: "seen", chat_id: chatId });
+  await aliceSock.wait(
+    (m) => m.type === "status" && m.status === "seen" && (m.message_ids || []).includes(echoed.id)
+  );
+
+  // Reconnecting runs the delivery sweep again; an already-read message must
+  // not be dragged back to 'delivered'.
+  bobSock.close();
+  await sleep(300);
+  bobSock = await openSocket(bobToken);
+  await sleep(600);
+
+  assertEqual(await statusOf(echoed.id), "seen", "status after a reconnect sweep");
 });
 
 // Opening a second connection must not disconnect the first. The old hub kept

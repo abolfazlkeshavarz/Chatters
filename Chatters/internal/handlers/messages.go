@@ -49,13 +49,14 @@ func GetMessages(c *gin.Context) {
 		limit = v
 	}
 
-	// Mark the other side's messages as seen, and tell everyone which ones.
+	// Fetching a chat's history means the user is looking at it, so the other
+	// side's messages become seen — the final delivery state.
 	rows, err := db.DB.Query(
 		`UPDATE messages
-		 SET status = 'seen'
-		 WHERE chat_id = $1 AND sender_id IS DISTINCT FROM $2 AND status <> 'seen'
+		 SET status = $3
+		 WHERE chat_id = $1 AND sender_id IS DISTINCT FROM $2 AND status <> $3
 		 RETURNING id`,
-		chatID, userID,
+		chatID, userID, websocket.StatusSeen,
 	)
 	if err == nil {
 		var seenIDs []int
@@ -68,7 +69,7 @@ func GetMessages(c *gin.Context) {
 		rows.Close()
 
 		if len(seenIDs) > 0 {
-			websocket.GlobalHub.BroadcastSeen(chatID, seenIDs)
+			websocket.GlobalHub.BroadcastStatus(chatID, websocket.StatusSeen, seenIDs)
 		}
 	}
 

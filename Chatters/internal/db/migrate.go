@@ -92,6 +92,20 @@ var migrations = []string{
 		created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 	)`,
 
+	// --- Message delivery state ---
+	// Three states: sent -> delivered -> seen. Older databases only ever held
+	// 'sent' and 'seen', both of which remain valid, so no data rewrite is
+	// needed; this only normalises anything unexpected before the constraint
+	// below would reject it.
+	`UPDATE messages SET status = 'sent' WHERE status IS NULL OR status NOT IN ('sent','delivered','seen')`,
+	`ALTER TABLE messages DROP CONSTRAINT IF EXISTS messages_status_check`,
+	`ALTER TABLE messages ADD CONSTRAINT messages_status_check
+		CHECK (status IN ('sent','delivered','seen'))`,
+
+	// Backs the per-chat unread counts and the delivery sweep, both of which
+	// filter on status.
+	`CREATE INDEX IF NOT EXISTS idx_messages_status ON messages(chat_id, status)`,
+
 	`CREATE INDEX IF NOT EXISTS idx_chat_members_user_id ON chat_members(user_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_messages_chat_id_created ON messages(chat_id, created_at)`,
 	`CREATE INDEX IF NOT EXISTS idx_message_keys_user ON message_keys(user_id)`,

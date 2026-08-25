@@ -136,10 +136,10 @@ func markSeen(hub *Hub, chatID, userID string) {
 
 	rows, err := db.DB.Query(
 		`UPDATE messages
-		 SET status = 'seen'
-		 WHERE chat_id = $1 AND sender_id IS DISTINCT FROM $2 AND status <> 'seen'
+		 SET status = $3
+		 WHERE chat_id = $1 AND sender_id IS DISTINCT FROM $2 AND status <> $3
 		 RETURNING id`,
-		chatID, userID,
+		chatID, userID, StatusSeen,
 	)
 	if err != nil {
 		return
@@ -155,7 +155,7 @@ func markSeen(hub *Hub, chatID, userID string) {
 	}
 
 	if len(seenIDs) > 0 {
-		hub.BroadcastSeen(chatID, seenIDs)
+		hub.BroadcastStatus(chatID, StatusSeen, seenIDs)
 	}
 }
 

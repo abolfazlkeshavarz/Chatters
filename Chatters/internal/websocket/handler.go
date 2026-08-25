@@ -58,5 +58,11 @@ func HandleWebSocket(hub *Hub) gin.HandlerFunc {
 
 		go writePump(client)
 		go readPump(hub, client)
+
+		// Coming online is the moment queued messages actually reach this
+		// device, so promote them from sent to delivered and let the senders
+		// know. Done after the pumps are running so the sweep's own broadcast
+		// can reach this connection too.
+		go hub.MarkDelivered(userID)
 	}
 }

@@ -131,6 +131,40 @@ export default function MessageList({ messages, me, onReply, secure = false }) {
 
   const byId = new Map(messages.map((m) => [m.id, m]));
 
+  // Delivery state is shown by the bubble's own colour rather than by a tick,
+  // so the three states have to stay clearly distinguishable from each other
+  // and from an incoming bubble.
+  function outgoingBubble(status) {
+    if (status === "seen") {
+      return {
+        background: "var(--success)",
+        color: "#fff",
+        borderColor: "transparent",
+      };
+    }
+    if (status === "delivered") {
+      return {
+        background: "var(--primary)",
+        color: "var(--primary-contrast)",
+        borderColor: "transparent",
+      };
+    }
+    // 'sent' and anything unrecognised: on the server, not yet on the device.
+    return {
+      background: "var(--bubble-sent)",
+      color: "var(--bubble-sent-text)",
+      borderColor: "var(--bubble-sent-border)",
+    };
+  }
+
+  // Colour alone is not an accessible signal, so the state is also exposed as
+  // text to assistive technology and on hover.
+  const STATUS_LABEL = {
+    sent: "Sent",
+    delivered: "Delivered",
+    seen: "Read",
+  };
+
   return (
     <>
       {preview && (
@@ -174,16 +208,16 @@ export default function MessageList({ messages, me, onReply, secure = false }) {
                 onMouseLeave={endHold}
                 onTouchStart={() => startHold(m)}
                 onTouchEnd={endHold}
+                title={mine ? STATUS_LABEL[m.status] || STATUS_LABEL.sent : undefined}
                 style={{
                   ...styles.bubble,
-                  background: mine
-                    ? m.status === "seen"
-                      ? "var(--success)"
-                      : secure
-                      ? "var(--secure)"
-                      : "var(--primary)"
-                    : "var(--bubble-in)",
-                  color: mine ? "#fff" : "var(--bubble-in-text)",
+                  ...(mine
+                    ? outgoingBubble(m.status)
+                    : {
+                        background: "var(--bubble-in)",
+                        color: "var(--bubble-in-text)",
+                        borderColor: "transparent",
+                      }),
                 }}
               >
                 {!mine && <div style={styles.sender}>{m.from}</div>}
@@ -208,7 +242,12 @@ export default function MessageList({ messages, me, onReply, secure = false }) {
                 <div style={styles.meta}>
                   {secure && <span title="End-to-end encrypted">🔒 </span>}
                   {formatTime(m.created_at)}
-                  {mine && (m.status === "seen" ? " ✓✓" : " ✓")}
+                  {mine && (
+                    <span className="sr-only">
+                      {" — "}
+                      {STATUS_LABEL[m.status] || STATUS_LABEL.sent}
+                    </span>
+                  )}
                 </div>
 
                 {heldId === m.id && (
@@ -263,6 +302,9 @@ const styles = {
     borderRadius: 18,
     wordBreak: "break-word",
     overflowWrap: "anywhere",
+    // Always present, transparent unless the delivery state needs it, so a
+    // bubble does not change size as it moves from sent to delivered.
+    border: "1px solid transparent",
   },
   sender: { fontSize: 12, fontWeight: 700, opacity: 0.85, marginBottom: 4 },
   text: { lineHeight: 1.45, whiteSpace: "pre-wrap", textAlign: "start" },

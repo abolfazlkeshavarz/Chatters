@@ -38,6 +38,14 @@
   --overlay: rgba(0, 0, 0, 0.45);
   --secure: #30b06a;
 
+  /* Outgoing bubbles are coloured by delivery state: white while the message
+     is only on the server, blue once it reaches the recipient's device, green
+     once they have actually read it. The border is what keeps the white state
+     legible against the near-white page background. */
+  --bubble-sent: #ffffff;
+  --bubble-sent-text: #1c1c1e;
+  --bubble-sent-border: #c7c7cc;
+
   /* Notch / home-indicator padding; resolves to 0 where unsupported. */
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -60,11 +68,32 @@
     --bubble-in: #2c2c2e;
     --bubble-in-text: #f2f2f7;
     --overlay: rgba(0, 0, 0, 0.7);
+
+    /* Still reads as "white" against a black page, but stops short of pure
+       #fff, which glares badly on a dark screen. */
+    --bubble-sent: #e9e9ed;
+    --bubble-sent-text: #1c1c1e;
+    --bubble-sent-border: #e9e9ed;
   }
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* Visible to screen readers only. Message delivery state is conveyed by bubble
+   colour, which is invisible to assistive technology, so the state is also
+   emitted as text here. */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 html,

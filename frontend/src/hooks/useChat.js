@@ -1,7 +1,24 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { getMessages } from "../api/messages";
+import { currentUser } from "../api/auth";
 import { chatSocket } from "../services/websocket";
 import { decryptMessage, encryptMessage } from "../crypto/e2ee";
+
+// Delivery states, in the order a message passes through them.
+const STATUS_ORDER = { sent: 0, delivered: 1, seen: 2 };
+
+/**
+ * Delivery state only ever moves forwards. Status events can arrive out of
+ * order — a reconnect sweep marking "delivered" may land just after the read
+ * receipt for the same message — and without this guard a green bubble would
+ * flip back to blue.
+ */
+export function advanceStatus(current, next) {
+  const from = STATUS_ORDER[current] ?? 0;
+  const to = STATUS_ORDER[next];
+  if (to === undefined) return current;
+  return to > from ? next : current;
+}
 
 /**
  * Drives one conversation: initial load, live updates, reconnect resync and
@@ -96,16 +113,28 @@ export function useChat({ chatId, encrypted = false, privateKey = null, recipien
     const offMessage = chatSocket.onMessage(async (msg) => {
       if (msg.chat_id !== chatIdRef.current) return;
 
-      if (msg.type === "seen") {
+      if (msg.type === "status" || msg.type === "seen") {
+        // "seen" is the pre-three-state event name; still accepted so a client
+        // left open across a deploy keeps updating.
+        const next = msg.type === "seen" ? "seen" : msg.status;
         const ids = new Set(msg.message_ids || []);
         setMessages((prev) =>
-          prev.map((m) => (ids.has(m.id) ? { ...m, status: "seen" } : m))
+          prev.map((m) =>
+            ids.has(m.id) ? { ...m, status: advanceStatus(m.status, next) } : m
+          )
         );
         return;
       }
 
       if (msg.type === "message" || msg.type === "media") {
         mergeMessages([await materialise(msg)]);
+
+        // A message that lands while this chat is on screen has been read the
+        // moment it arrives, so acknowledge it rather than leaving it stuck on
+        // "delivered" until the user navigates away and back.
+        if (msg.from !== currentUser() && document.visibilityState === "visible") {
+          chatSocket.send({ type: "seen", chat_id: chatIdRef.current });
+        }
       }
     });
 
@@ -129,6 +158,21 @@ export function useChat({ chatId, encrypted = false, privateKey = null, recipien
   useEffect(() => {
     if (chatId) chatSocket.send({ type: "seen", chat_id: chatId });
   }, [chatId]);
+
+  // Returning to a chat that was already open counts as reading it. Without
+  // this, messages that arrived while the app sat in the background would stay
+  // "delivered" for the sender even though the recipient is now looking right
+  // at them — the socket never dropped, so no reconnect resync fires either.
+  useEffect(() => {
+    function onVisible() {
+      if (document.visibilityState === "visible" && chatIdRef.current) {
+        chatSocket.send({ type: "seen", chat_id: chatIdRef.current });
+      }
+    }
+
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, []);
 
   const send = useCallback(
     async (text, replyTo) => {

@@ -6,7 +6,7 @@ Chatters is a real-time messenger:
 - **Frontend** — React (Create React App), installable as a PWA. [frontend/](frontend)
 - **Reverse proxy** — nginx serves the React build and proxies `/login`, `/register`, `/api/*` and `/healthz` to the backend.
 
-Features: direct and group chats, file attachments, read receipts, an admin panel, opt-in end-to-end encryption, and push notifications.
+Features: direct and group chats, file attachments, three-state delivery receipts, an admin panel, opt-in end-to-end encryption, and push notifications.
 
 ---
 
@@ -118,6 +118,31 @@ The server stores ciphertext plus one wrapped key per recipient. It holds nothin
 - **Encryption cannot be switched off** once enabled — otherwise a compromised account could silently downgrade a conversation. Start a new chat instead.
 - **Changing your password issues a new key.** Existing secure messages stay readable only on devices that still hold the old key.
 - **Group chats are supported** (the message key is wrapped per member), but a member added later cannot read earlier messages.
+
+---
+
+## Message delivery states
+
+Your own messages are coloured by how far they have got. There are no tick marks — the bubble itself is the indicator.
+
+| Colour | State | Meaning |
+|---|---|---|
+| **White** | `sent` | Stored on the server. The recipient has no live connection, so it has not reached their device. |
+| **Blue** | `delivered` | The recipient is connected and has the message, but has not opened the chat. |
+| **Green** | `seen` | The recipient has the chat open and has read it. |
+
+Incoming messages keep the neutral grey bubble regardless of state.
+
+A message only ever moves forwards. Status updates can arrive out of order — a reconnect can re-run the delivery sweep just after a read receipt — so both the server and the client refuse to move a message back to an earlier state.
+
+What advances each step:
+
+- **delivered** — set when the recipient's WebSocket connects, which is also when a backgrounded phone wakes up. Being connected is deliberately *not* treated as having read the message.
+- **seen** — set when the recipient actually opens the conversation, returns to an already-open one, or receives a message while looking at it.
+
+In a **group chat**, delivered and seen mean *at least one* other member, not all of them. Per-recipient receipts would need a row per member per message, which this app does not store.
+
+Colour is not an accessible signal on its own, so each of your messages also carries a hidden text label (`Sent` / `Delivered` / `Read`) for screen readers, and the same text appears on hover.
 
 ---
 

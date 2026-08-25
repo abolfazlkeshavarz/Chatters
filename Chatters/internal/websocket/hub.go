@@ -13,6 +13,23 @@ import (
 
 var GlobalHub *Hub
 
+// Delivery states of a message, in the order they may advance. A message only
+// ever moves forwards: every update is guarded so a later state is never
+// overwritten by an earlier one arriving out of order.
+//
+//	sent      stored by the server; nobody has received it yet
+//	delivered a recipient has a live connection, but has not opened the chat
+//	seen      a recipient has the chat open
+//
+// In a group chat "delivered" and "seen" mean *some* recipient, not all of
+// them: per-recipient receipts would need a row per member per message, which
+// this app does not keep.
+const (
+	StatusSent      = "sent"
+	StatusDelivered = "delivered"
+	StatusSeen      = "seen"
+)
+
 // MessageKey is one recipient's wrapped copy of an end-to-end encrypted
 // message's content key.
 type MessageKey struct {
@@ -181,24 +198,25 @@ func (h *Hub) handleIncoming(msg ChatMessage) {
 		From:        msg.From,
 		Content:     msg.Content,
 		CreatedAt:   createdAt.Format(time.RFC3339Nano),
-		Status:      "sent",
+		Status:      StatusSent,
 		ReplyTo:     msg.ReplyTo,
 		IsEncrypted: msg.IsEncrypted,
 		CipherIV:    msg.CipherIV,
 	}
 
-	// If any recipient already has the chat open, mark it seen immediately.
-	recipientOnline := false
+	// A connected recipient has received the message, but being connected is
+	// not the same as having read it — that only happens once they open the
+	// chat and the client sends a "seen" event. Marking it seen here (as this
+	// used to) turned every online recipient into a false read receipt.
 	for _, userID := range members {
 		if userID != msg.From && h.IsOnline(userID) {
-			recipientOnline = true
+			if _, err := db.DB.Exec(
+				`UPDATE messages SET status = $1 WHERE id = $2 AND status = $3`,
+				StatusDelivered, id, StatusSent,
+			); err == nil {
+				out.Status = StatusDelivered
+			}
 			break
-		}
-	}
-	if recipientOnline {
-		if _, err := db.DB.Exec(`UPDATE messages SET status='seen' WHERE id=$1`, id); err == nil {
-			out.Status = "seen"
-			h.BroadcastSeen(msg.ChatID, []int{id})
 		}
 	}
 
@@ -311,10 +329,17 @@ func (h *Hub) pushToOffline(msg ChatMessage, members []string, id int) {
 	}
 }
 
-func (h *Hub) BroadcastSeen(chatID string, messageIDs []int) {
+// BroadcastStatus tells a chat's members that some of its messages have moved
+// to a new delivery state, so senders can recolour them without refetching.
+func (h *Hub) BroadcastStatus(chatID, status string, messageIDs []int) {
+	if len(messageIDs) == 0 {
+		return
+	}
+
 	payload, err := json.Marshal(map[string]interface{}{
-		"type":        "seen",
+		"type":        "status",
 		"chat_id":     chatID,
+		"status":      status,
 		"message_ids": messageIDs,
 	})
 	if err != nil {
@@ -326,6 +351,48 @@ func (h *Hub) BroadcastSeen(chatID string, messageIDs []int) {
 	}
 }
 
+// MarkDelivered advances every message still awaiting delivery to this user,
+// across all their chats, and notifies the senders. Called when a connection
+// is registered: coming online is exactly the moment undelivered messages
+// reach the device, whether that is a fresh login or a phone waking up.
+//
+// Only 'sent' rows are touched, so a message already marked seen can never be
+// dragged backwards by a later reconnect.
+func (h *Hub) MarkDelivered(userID string) {
+	rows, err := db.DB.Query(
+		`UPDATE messages m
+		 SET status = $2
+		 FROM chat_members cm
+		 WHERE cm.chat_id = m.chat_id
+		   AND cm.user_id = $1
+		   AND m.sender_id IS DISTINCT FROM $1
+		   AND m.status = $3
+		 RETURNING m.id, m.chat_id`,
+		userID, StatusDelivered, StatusSent,
+	)
+	if err != nil {
+		log.Printf("websocket: delivery sweep for %s failed: %v", userID, err)
+		return
+	}
+	defer rows.Close()
+
+	byChat := map[string][]int{}
+	for rows.Next() {
+		var id int
+		var chatID string
+		if rows.Scan(&id, &chatID) == nil {
+			byChat[chatID] = append(byChat[chatID], id)
+		}
+	}
+	if rows.Err() != nil {
+		return
+	}
+
+	for chatID, ids := range byChat {
+		h.BroadcastStatus(chatID, StatusDelivered, ids)
+	}
+}
+
 func (h *Hub) BroadcastMedia(chatID string, messageID int, filename, mimeType, from, createdAt string) {
 	payload, err := json.Marshal(ChatMessage{
 		Type:      "message",
@@ -334,7 +401,7 @@ func (h *Hub) BroadcastMedia(chatID string, messageID int, filename, mimeType, f
 		From:      from,
 		Content:   filename,
 		CreatedAt: createdAt,
-		Status:    "sent",
+		Status:    StatusSent,
 		Filename:  filename,
 		MimeType:  mimeType,
 		HasFile:   true,
