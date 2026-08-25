@@ -1,0 +1,15 @@
+# Local HTTPS, for exercising notifications and end-to-end encryption from a
+# phone on your network. Both are gated behind a secure context, which a LAN
+# address over plain HTTP is not.
+#
+# Use via `make https`, or directly:
+#   docker compose -f docker-compose.yml -f docker-compose.https.yml up -d
+#
+# Requires certificates in ./certs — generate them with scripts/gen-certs.sh.
+services:
+  frontend:
+    ports:
+      - "${HTTPS_PORT:-8443}:443"
+    volumes:
+      - ./certs:/etc/nginx/certs:ro
+      - ./frontend/nginx-tls.conf:/etc/nginx/conf.d/default.conf:ro

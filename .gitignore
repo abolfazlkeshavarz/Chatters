@@ -1,6 +1,12 @@
 # Environment
 .env
 
+# Locally-generated TLS certificates and their private keys (make certs).
+# These are machine-specific and must never be committed.
+certs/
+*.pem
+*.key
+
 # Go
 Chatters/private_uploads/
 Chatters/chatters-server

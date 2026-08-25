@@ -140,6 +140,21 @@ func GetChats(c *gin.Context) {
 			FROM messages
 			WHERE chat_id IN (SELECT chat_id FROM my_chats)
 			ORDER BY chat_id, created_at DESC, id DESC
+		),
+		-- Per-chat message stats are aggregated here, before the chat_members
+		-- join below. Counting them alongside that join instead would multiply
+		-- every message by the number of members: a two-person chat reported
+		-- double the unread count, a three-person group triple it.
+		stats AS (
+			SELECT
+				chat_id,
+				COUNT(*) FILTER (
+					WHERE sender_id IS DISTINCT FROM $1 AND status <> 'seen'
+				) AS unread_count,
+				MAX(created_at) AS last_activity
+			FROM messages
+			WHERE chat_id IN (SELECT chat_id FROM my_chats)
+			GROUP BY chat_id
 		)
 		SELECT
 			c.id,
@@ -147,26 +162,23 @@ func GetChats(c *gin.Context) {
 			c.e2e_enabled,
 			c.name,
 			ARRAY_AGG(DISTINCT m.user_id) AS members,
-			COUNT(msg.id) FILTER (
-				WHERE msg.sender_id IS DISTINCT FROM $1 AND msg.status <> 'seen'
-			) AS unread_count,
-			MAX(msg.created_at) AS last_activity,
+			COALESCE(s.unread_count, 0) AS unread_count,
+			s.last_activity,
 			lm.content,
 			lm.created_at,
 			lm.sender_id,
 			COALESCE(lm.is_encrypted, false)
 		FROM chats c
 		JOIN chat_members m ON m.chat_id = c.id
-		LEFT JOIN messages msg ON msg.chat_id = c.id
+		LEFT JOIN stats s ON s.chat_id = c.id
 		LEFT JOIN last_msg lm ON lm.chat_id = c.id
 		WHERE c.id IN (SELECT chat_id FROM my_chats)
 		GROUP BY c.id, c.is_group, c.e2e_enabled, c.name, c.created_at,
+		         s.unread_count, s.last_activity,
 		         lm.content, lm.created_at, lm.sender_id, lm.is_encrypted
 		ORDER BY
-			CASE WHEN COUNT(msg.id) FILTER (
-				WHERE msg.sender_id IS DISTINCT FROM $1 AND msg.status <> 'seen'
-			) > 0 THEN 0 ELSE 1 END,
-			COALESCE(MAX(msg.created_at), c.created_at) DESC
+			CASE WHEN COALESCE(s.unread_count, 0) > 0 THEN 0 ELSE 1 END,
+			COALESCE(s.last_activity, c.created_at) DESC
 	`, userID)
 
 	if err != nil {

@@ -156,6 +156,8 @@ Turn notifications on in **👤 پروفایل → 🔔 Notifications**. This re
 
 Android and desktop Chrome/Edge/Firefox work in a regular tab, though installing still gives a better experience.
 
+To try this from a phone against a local checkout, see [Testing on a phone](#testing-on-a-phone) — plain HTTP will not do, because service workers need a secure context.
+
 ---
 
 ## Reconnection behaviour
@@ -167,6 +169,83 @@ The reported bug — *"after switching to another app and back, I have to close 
 3. **The client never reconnected.** It now reconnects with exponential backoff and jitter, and immediately when the tab becomes visible, the network returns, or the page is restored from the back/forward cache — which is exactly the app-switch case. On every reconnect it refetches the conversation, so anything sent during the gap is merged in rather than lost.
 
 A banner appears while the connection is down, so this state is visible instead of silent.
+
+---
+
+## Testing on a phone
+
+Browsers gate Web Crypto, service workers and the Push API behind a **secure context**. `localhost` counts as one; a LAN address like `192.168.1.5` does not. So how you serve the app decides which features you can exercise.
+
+| | `make lan` | `make https` | `make tunnel` |
+|---|---|---|---|
+| Sign-in, chats, unread counts, delivery colours | yes | yes | yes |
+| Secure (end-to-end encrypted) chats | **no** | yes | yes |
+| Push notifications, PWA install | **no** | yes | yes |
+| Setup needed on the phone | none | install a certificate | none |
+| Reachable from the internet | no | no | **yes, while running** |
+
+A crucial detail if you are tempted to shortcut this: **a self-signed certificate you click past does not work.** Browsers refuse to register a service worker when certificate validation fails, even after you accept the warning — so notifications would silently never arrive and it would look like an app bug. The certificate has to be genuinely trusted.
+
+### Plain HTTP — quickest, limited
+
+```bash
+make lan
+```
+
+Binds to all interfaces and prints the URLs for a phone on the same Wi-Fi. `make lan LAN_PORT=9000` for a different port.
+
+Sign-in degrades rather than failing: encryption key setup is skipped with a console warning and normal chats carry on. Good enough for testing message flow, unread counts and delivery colours.
+
+### HTTPS on your network — full features, stays local
+
+One-time setup. Install [mkcert](https://github.com/FiloSottile/mkcert), which creates a certificate authority your machine trusts:
+
+```bash
+brew install mkcert nss
+```
+
+(Windows: `choco install mkcert`. Linux: `apt install libnss3-tools` plus the release binary.)
+
+Then issue a certificate covering this machine's addresses:
+
+```bash
+make certs
+```
+
+```bash
+make https
+```
+
+That prints `https://<your-ip>:8443`. Use `make https HTTPS_PORT=9443` for a different port.
+
+**The phone must trust the CA**, or the page will not load and service workers will not register. `make certs` prints the path to `rootCA.pem` — get that file onto the device (AirDrop, email it to yourself, or serve it over `make lan`) and then:
+
+- **Android** — Settings → Security → Encryption & credentials → Install a certificate → CA certificate. Android warns loudly; that is expected for a private CA.
+- **iOS/iPadOS** — open the file to install the profile, then Settings → General → VPN & Device Management to install it, **and then** Settings → General → About → Certificate Trust Settings and switch it on. The second step is separate and easy to miss — without it the certificate stays untrusted.
+
+The certificate and key land in `certs/`, which is git-ignored. Never commit them.
+
+### Public tunnel — full features, nothing to install
+
+```bash
+make up
+```
+
+```bash
+make tunnel
+```
+
+Prints a `https://<random>.trycloudflare.com` URL with a publicly trusted certificate. Nothing to install on the phone, which makes this by far the easiest route on iOS.
+
+The trade-off: **your development instance is reachable from the internet for as long as the tunnel runs.** The hostname is random and it dies on Ctrl-C, but do not leave it running unattended, and do not use real credentials you care about.
+
+### Notifications specifically
+
+Turn them on per device in **👤 پروفایل → 🔔 Notifications**. Requires `VAPID_*` keys on the server — `make secrets` generates them.
+
+**On iPhone and iPad you must add the app to the Home Screen first** (iOS 16.4+). iOS does not expose the Push API to an ordinary Safari tab at all, no matter how good your certificate is. Share → *Add to Home Screen*, open Chatters from that icon, then enable notifications. The Profile page detects this and explains it rather than failing silently.
+
+Android and desktop browsers work in a regular tab.
 
 ---
 
@@ -193,6 +272,12 @@ ADMIN_PASSWORD=your_admin_password BASE_URL=http://localhost node scripts/integr
 ```
 
 It deliberately reimplements the client side of the encryption protocol rather than importing the app's module, so the two implementations agreeing is real evidence the wire format is right.
+
+The suite finishes by deliberately tripping the login rate limiter, which is held in memory. Running it twice in a row therefore fails early with `401 missing token`, because the second run's sign-in is still throttled. Restart the backend between runs:
+
+```bash
+docker compose restart backend
+```
 
 To run the Go tests under the race detector (needs a Linux toolchain):
 

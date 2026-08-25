@@ -559,6 +559,49 @@ await check("the heartbeat is answered", async () => {
   assert(pong, "no pong received");
 });
 
+section("Unread counts");
+
+// Regression test for a cartesian-product bug: the chat list query joined both
+// chat_members and messages, so every message was counted once per member.
+// A two-person chat reported double, a three-person group triple.
+await check("unread count is not multiplied by the member count", async () => {
+  const carol = `carol${stamp}`;
+  await api("/api/admin/users", {
+    method: "POST",
+    token: adminToken,
+    body: { username: carol, email: `${carol}@example.com`, password: "CarolPass1!x" },
+    expect: 200,
+  });
+
+  // A group of three, so a per-member multiplier would be a factor of 3 and
+  // could not be confused with the two-member case.
+  const { data: group } = await api("/api/chats", {
+    method: "POST",
+    token: aliceToken,
+    body: { members: [BOB, carol], is_group: true, name: `counts ${stamp}` },
+    expect: 200,
+  });
+
+  const sock = await openSocket(aliceToken);
+  const bodies = [`count probe 1 ${stamp}`, `count probe 2 ${stamp}`];
+  for (const body of bodies) {
+    sock.send({ chat_id: group.chat_id, content: body });
+    await sock.wait((m) => m.type === "message" && m.content === body);
+  }
+  sock.close();
+
+  const { data: chats } = await api("/api/chats", { token: bobToken, expect: 200 });
+  const row = chats.find((c) => c.id === group.chat_id);
+  assert(row, "the new group is missing from the chat list");
+
+  assertEqual(row.members.length, 3, "group member count");
+  assertEqual(
+    row.unread_count,
+    bodies.length,
+    `unread count for ${bodies.length} messages in a ${row.members.length}-member group`
+  );
+});
+
 section("Delivery state: sent -> delivered -> seen");
 
 // The three states drive the bubble colour (white / blue / green), so each

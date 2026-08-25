@@ -1,7 +1,15 @@
-.PHONY: help env secrets vapid up down restart build logs ps clean db-shell backend-shell \
+.PHONY: help env secrets vapid up lan certs https tunnel down restart build logs ps clean db-shell backend-shell \
         test backend-test frontend-test backend-build frontend-install frontend-build
 
 COMPOSE = docker compose
+
+# Host port used by "make lan". Override: make lan LAN_PORT=9000
+LAN_PORT ?= 8080
+
+# Host port for "make https".
+HTTPS_PORT ?= 8443
+
+COMPOSE_HTTPS = docker compose -f docker-compose.yml -f docker-compose.https.yml
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -29,6 +37,28 @@ vapid: ## Print a fresh Web Push VAPID key pair
 
 up: env ## Build images if needed and start the whole stack in the background
 	$(COMPOSE) up -d --build
+
+# HTTP_PORT is set in the shell, which takes precedence over .env, so a
+# checkout configured for a localhost-only production bind can still be opened
+# from a phone without editing (and later forgetting to revert) .env.
+lan: env ## Run reachable from phones on your network, and print the URL
+	HTTP_PORT=$(LAN_PORT) $(COMPOSE) up -d --build
+	@bash scripts/lan-url.sh $(LAN_PORT)
+
+certs: ## Issue a locally-trusted TLS certificate for phone testing (needs mkcert)
+	@bash scripts/gen-certs.sh
+
+# Notifications and end-to-end encryption need a secure context, which a LAN
+# address over plain HTTP is not. This serves the same stack over TLS.
+https: env ## Run over HTTPS so notifications and secure chat work from a phone
+	@if [ ! -f certs/cert.pem ]; then \
+		echo "No certificate found. Run 'make certs' first."; exit 1; \
+	fi
+	HTTP_PORT=$(LAN_PORT) HTTPS_PORT=$(HTTPS_PORT) $(COMPOSE_HTTPS) up -d --build
+	@bash scripts/lan-url.sh $(LAN_PORT) $(HTTPS_PORT)
+
+tunnel: ## Expose the running stack on a temporary public HTTPS URL (no cert setup)
+	@bash scripts/tunnel.sh
 
 down: ## Stop and remove containers (data volumes are kept)
 	$(COMPOSE) down
