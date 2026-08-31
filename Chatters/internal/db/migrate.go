@@ -110,6 +110,67 @@ var migrations = []string{
 	`CREATE INDEX IF NOT EXISTS idx_messages_chat_id_created ON messages(chat_id, created_at)`,
 	`CREATE INDEX IF NOT EXISTS idx_message_keys_user ON message_keys(user_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id)`,
+
+	// --- E2E encryption: consent handshake ---
+	// e2e_enabled flips on only once the OTHER member accepts, so a chat can no
+	// longer be silently upgraded by one side. 'accepted' implies e2e_enabled;
+	// 'pending' means a request is awaiting a response; 'none' is the default.
+	`ALTER TABLE chats ADD COLUMN IF NOT EXISTS e2e_status TEXT NOT NULL DEFAULT 'none'`,
+	`ALTER TABLE chats ADD COLUMN IF NOT EXISTS e2e_requested_by TEXT REFERENCES users(id) ON DELETE SET NULL ON UPDATE CASCADE`,
+	`ALTER TABLE chats ADD COLUMN IF NOT EXISTS e2e_requested_at TIMESTAMPTZ`,
+	// Databases from before this handshake existed already have e2e_enabled
+	// chats; they are grandfathered in as accepted rather than losing state.
+	`UPDATE chats SET e2e_status = 'accepted' WHERE e2e_enabled AND e2e_status = 'none'`,
+	`ALTER TABLE chats DROP CONSTRAINT IF EXISTS chats_e2e_status_check`,
+	`ALTER TABLE chats ADD CONSTRAINT chats_e2e_status_check
+		CHECK (e2e_status IN ('none','pending','accepted'))`,
+
+	// --- Admin-configurable app settings (key/value) ---
+	`CREATE TABLE IF NOT EXISTS app_settings (
+		key        TEXT PRIMARY KEY,
+		value      TEXT NOT NULL,
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`,
+
+	// --- Per-user chat muting ---
+	`CREATE TABLE IF NOT EXISTS chat_mutes (
+		chat_id UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+		user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+		muted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+		PRIMARY KEY (chat_id, user_id)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_chat_mutes_user ON chat_mutes(user_id)`,
+
+	// --- Contacts ---
+	// One-directional, like Telegram: owner added contact, not necessarily the
+	// other way around. Not a prerequisite for messaging someone (chats can
+	// still be created by username directly) — this is purely what populates
+	// the "New chat" / "New group" picker instead of typing a username blind.
+	`CREATE TABLE IF NOT EXISTS contacts (
+		owner_id   TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+		contact_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+		PRIMARY KEY (owner_id, contact_id),
+		CHECK (owner_id <> contact_id)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_contacts_owner ON contacts(owner_id)`,
+
+	// --- Profile photos ---
+	// 'public' is visible to any signed-in user; 'contacts' only to someone on
+	// either side of a contacts relationship with the owner. Chat membership
+	// does NOT override this — a group mate is not automatically a contact,
+	// and the visibility setting is a privacy choice the app has to honour
+	// even inside a conversation the owner is already part of.
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_path TEXT`,
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_mime TEXT`,
+	// Not just informational: the frontend appends this as a query string
+	// (?v=<timestamp>) so a freshly replaced avatar gets a URL the browser has
+	// never cached, rather than needing a manual cache-busting scheme.
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_updated_at TIMESTAMPTZ`,
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS avatar_visibility TEXT NOT NULL DEFAULT 'public'`,
+	`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_avatar_visibility_check`,
+	`ALTER TABLE users ADD CONSTRAINT users_avatar_visibility_check
+		CHECK (avatar_visibility IN ('public','contacts'))`,
 }
 
 // renameCascades repoints foreign keys at users(id) so that renaming a user

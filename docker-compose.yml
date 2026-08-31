@@ -16,6 +16,22 @@ services:
       timeout: 5s
       retries: 10
 
+  # Optional in the code (every caller falls back to in-memory, single-process
+  # behaviour without it) but included by default here because it is what
+  # makes `docker compose up --scale backend=N` actually work: it shares rate
+  # limits and WebSocket tickets across replicas, and carries the Pub/Sub that
+  # lets a message reach a recipient connected to a different replica than the
+  # sender. See HELP.md's "Scaling out" section.
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
   backend:
     build:
       context: ./Chatters
@@ -27,6 +43,8 @@ services:
       DB_PASSWORD: ${POSTGRES_PASSWORD:-change_me}
       DB_NAME: ${POSTGRES_DB:-messenger}
       DB_SSLMODE: disable
+
+      REDIS_URL: redis://redis:6379/0
 
       JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set - run "make env" then edit .env}
       GIN_MODE: release
@@ -59,13 +77,15 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
 
   frontend:
     build:
       context: ./frontend
     restart: unless-stopped
     ports:
-      - "8081:80"
+      - "${HTTP_PORT:-80}:80"
     depends_on:
       - backend
 

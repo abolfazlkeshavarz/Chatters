@@ -1,6 +1,8 @@
-import { useEffect, useState } from "react";
-import { logout } from "../api/auth";
+import { useEffect, useRef, useState } from "react";
+import { logout, getMe } from "../api/auth";
 import { api } from "../api/client";
+import { deleteAvatar, setAvatarVisibility, uploadAvatar } from "../api/avatar";
+import Avatar from "../components/Avatar";
 import {
   disablePush,
   enablePush,
@@ -35,11 +37,25 @@ export default function Profile({ onLogout }) {
   const [pushOn, setPushOn] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
 
+  const [hasAvatar, setHasAvatar] = useState(false);
+  const [avatarVisibility, setVisibility] = useState("public");
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  // Bumped after every upload/delete so <Avatar> (keyed on this) remounts and
+  // refetches instead of showing the photo it already cached in this tab.
+  const [avatarRefresh, setAvatarRefresh] = useState(0);
+  const fileInputRef = useRef(null);
+
   const support = pushSupport();
 
   useEffect(() => {
     loadIdentity(username).then((id) => setHasKey(Boolean(id)));
     isSubscribed().then(setPushOn);
+    getMe()
+      .then((me) => {
+        setHasAvatar(Boolean(me.has_avatar));
+        setVisibility(me.avatar_visibility || "public");
+      })
+      .catch(() => {});
   }, [username]);
 
   function reset(msg) {
@@ -119,6 +135,57 @@ export default function Profile({ onLogout }) {
     }
   }
 
+  async function handleAvatarFile(e) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // lets picking the same file again re-fire onChange
+    if (!file) return;
+
+    if (file.size > 5 * 1024 * 1024) {
+      setError("Image is too large (max 5 MB)");
+      return;
+    }
+
+    setAvatarBusy(true);
+    setError("");
+    try {
+      await uploadAvatar(file);
+      setHasAvatar(true);
+      setAvatarRefresh((n) => n + 1);
+      reset("Profile photo updated");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
+
+  async function handleRemoveAvatar() {
+    setAvatarBusy(true);
+    setError("");
+    try {
+      await deleteAvatar();
+      setHasAvatar(false);
+      setAvatarRefresh((n) => n + 1);
+      reset("Profile photo removed");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
+
+  async function handleVisibilityChange(e) {
+    const next = e.target.value;
+    const prev = avatarVisibility;
+    setVisibility(next); // optimistic
+    try {
+      await setAvatarVisibility(next);
+    } catch (err) {
+      setVisibility(prev);
+      setError(err.message);
+    }
+  }
+
   async function togglePush() {
     setPushBusy(true);
     setError("");
@@ -145,6 +212,54 @@ export default function Profile({ onLogout }) {
 
       <Section title="نام کاربری">
         <div style={{ fontSize: 16, fontWeight: 500 }}>{username}</div>
+      </Section>
+
+      <Section title="📷 Profile photo">
+        <div className="row" style={{ alignItems: "center", gap: 14 }}>
+          <Avatar key={avatarRefresh} userId={username} size={64} />
+          <div className="stack" style={{ gap: 6, flex: 1 }}>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/jpeg,image/png,image/webp,image/gif"
+              style={{ display: "none" }}
+              onChange={handleAvatarFile}
+            />
+            <button
+              className="btn btn-secondary"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={avatarBusy}
+            >
+              {avatarBusy ? "…" : hasAvatar ? "Change photo" : "Upload photo"}
+            </button>
+            {hasAvatar && (
+              <button
+                className="btn btn-secondary"
+                onClick={handleRemoveAvatar}
+                disabled={avatarBusy}
+              >
+                Remove photo
+              </button>
+            )}
+          </div>
+        </div>
+
+        <div className="stack" style={{ gap: 4 }}>
+          <div className="muted" style={{ fontSize: 13 }}>Who can see it</div>
+          <select
+            className="field"
+            value={avatarVisibility}
+            onChange={handleVisibilityChange}
+          >
+            <option value="public">Everyone</option>
+            <option value="contacts">My contacts only</option>
+          </select>
+          <div className="muted" style={{ fontSize: 12 }}>
+            {avatarVisibility === "contacts"
+              ? "Only people you have added as a contact, or who have added you, can see this photo — including in group chats."
+              : "Visible to any signed-in user."}
+          </div>
+        </div>
       </Section>
 
       <Section title="🔔 Notifications">

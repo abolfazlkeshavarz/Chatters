@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -61,6 +62,16 @@ func UploadMedia(c *gin.Context) {
 
 	file, err := c.FormFile("file")
 	if err != nil {
+		// An oversized body trips MaxBytesReader mid-parse, so
+		// ParseMultipartForm fails with *http.MaxBytesError rather than ever
+		// reaching the file.Size check below. Without telling that apart from
+		// "no file field at all", a too-large upload was reported as a
+		// malformed request instead of the 413 a client can actually act on.
+		var tooLarge *http.MaxBytesError
+		if errors.As(err, &tooLarge) {
+			c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "file is too large"})
+			return
+		}
 		c.JSON(http.StatusBadRequest, gin.H{"error": "file required"})
 		return
 	}
@@ -144,10 +155,15 @@ func UploadMedia(c *gin.Context) {
 		chatID, messageID, originalName, mimeType, userID, createdAt.Format(time.RFC3339Nano),
 	)
 
+	title, prefixSender := groupNotificationTitle(chatID, userID)
+	body := "📎 " + originalName
+	if prefixSender {
+		body = userID + ": " + body
+	}
 	notifyChat(chatID, userID, push.Notification{
 		Type:   "media",
-		Title:  userID,
-		Body:   "📎 " + originalName,
+		Title:  title,
+		Body:   body,
 		ChatID: chatID,
 		From:   userID,
 	})

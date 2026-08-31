@@ -1,6 +1,8 @@
 package websocket
 
 import (
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"sync"
 	"time"
@@ -24,6 +26,12 @@ const (
 )
 
 type Client struct {
+	// id is unique per connection, process-wide. It is what the presence set
+	// in Redis stores one entry per — without it, two backend replicas (or
+	// two tabs on this same one) could not tell their own connections for the
+	// same user apart, and an unregister on one could wipe out the presence
+	// entry the other still needs.
+	id     string
 	UserID string
 	Conn   *websocket.Conn
 	Send   chan []byte
@@ -41,11 +49,18 @@ type Client struct {
 
 func NewClient(userID string, conn *websocket.Conn) *Client {
 	return &Client{
+		id:     newClientID(),
 		UserID: userID,
 		Conn:   conn,
 		Send:   make(chan []byte, sendBuffer),
 		done:   make(chan struct{}),
 	}
+}
+
+func newClientID() string {
+	buf := make([]byte, 12)
+	_, _ = rand.Read(buf) // crypto/rand.Read never errors in practice
+	return hex.EncodeToString(buf)
 }
 
 // close marks the client finished and drops the socket. Safe to call from any

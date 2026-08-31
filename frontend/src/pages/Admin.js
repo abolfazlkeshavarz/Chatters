@@ -2,13 +2,109 @@ import { useCallback, useEffect, useState } from "react";
 import {
   createUser,
   deleteUser,
+  getE2ERetention,
   getStats,
   listUsers,
+  purgeE2EMessages,
   resetPassword,
+  setE2ERetention,
   setRole,
 } from "../api/admin";
 
 const PAGE_SIZE = 25;
+
+// value in seconds, matching what the API stores; 0 means "never".
+const RETENTION_PRESETS = [
+  { label: "Never (keep forever)", seconds: 0 },
+  { label: "12 hours", seconds: 12 * 3600 },
+  { label: "1 day", seconds: 24 * 3600 },
+  { label: "3 days", seconds: 3 * 24 * 3600 },
+  { label: "7 days", seconds: 7 * 24 * 3600 },
+];
+
+function E2ERetentionPanel({ onNotice, onError }) {
+  const [seconds, setSeconds] = useState(null);
+  const [saving, setSaving] = useState(false);
+  const [purging, setPurging] = useState(false);
+
+  useEffect(() => {
+    getE2ERetention()
+      .then((d) => setSeconds(d.retention_seconds ?? 0))
+      .catch((err) => onError(err.message));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  async function handleChange(e) {
+    const next = Number(e.target.value);
+    setSeconds(next);
+    setSaving(true);
+    try {
+      await setE2ERetention(next);
+      const preset = RETENTION_PRESETS.find((p) => p.seconds === next);
+      onNotice(`Auto-delete for encrypted chats set to: ${preset?.label || `${next}s`}`);
+    } catch (err) {
+      onError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function handlePurgeNow() {
+    if (
+      !window.confirm(
+        "Delete every message in every end-to-end encrypted chat right now?\n\n" +
+          "This clears their content immediately, for all users. The chats " +
+          "themselves and their encrypted status are kept — only the messages " +
+          "are removed. This cannot be undone."
+      )
+    ) {
+      return;
+    }
+
+    setPurging(true);
+    try {
+      const res = await purgeE2EMessages();
+      onNotice(`Deleted ${res.deleted} encrypted message(s) from all secure chats`);
+    } catch (err) {
+      onError(err.message);
+    } finally {
+      setPurging(false);
+    }
+  }
+
+  return (
+    <div className="card stack" style={{ padding: 16 }}>
+      <div style={{ fontWeight: 600 }}>🔒 Encrypted chat data retention</div>
+      <div className="muted" style={{ fontSize: 13 }}>
+        Automatically deletes messages in end-to-end encrypted chats once they
+        reach this age. Applies to every secure chat; checked every few
+        minutes.
+      </div>
+
+      <select
+        className="field"
+        value={seconds ?? 0}
+        onChange={handleChange}
+        disabled={seconds === null || saving}
+      >
+        {RETENTION_PRESETS.map((p) => (
+          <option key={p.seconds} value={p.seconds}>
+            {p.label}
+          </option>
+        ))}
+      </select>
+
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "center" }}>
+        <div className="muted" style={{ fontSize: 12 }}>
+          Or clear everything immediately, independent of the setting above.
+        </div>
+        <button className="btn btn-danger" onClick={handlePurgeNow} disabled={purging}>
+          {purging ? "Deleting…" : "Delete all encrypted chats now"}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 function StatCard({ label, value }) {
   return (
@@ -261,6 +357,8 @@ export default function Admin() {
         🔒 Messages in end-to-end encrypted chats are stored as ciphertext and
         cannot be read from here — only counted.
       </div>
+
+      <E2ERetentionPanel onNotice={flash} onError={setError} />
 
       <div className="row">
         <input

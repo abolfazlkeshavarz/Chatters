@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -8,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"messenger/internal/cache"
 	"messenger/internal/config"
 	"messenger/internal/db"
 	"messenger/internal/handlers"
@@ -47,6 +49,14 @@ func main() {
 
 	config.Load()
 
+	// Optional: every caller downstream falls back to single-process behaviour
+	// when Redis is not configured, so a connection failure here is fatal only
+	// if REDIS_URL was actually set — an operator who set it clearly wants it
+	// used, and silently running without it would hide a real config problem.
+	if err := cache.Connect(context.Background()); err != nil {
+		log.Fatalf("redis connection failed: %v", err)
+	}
+
 	if err := db.Connect(); err != nil {
 		log.Fatalf("database connection failed: %v", err)
 	}
@@ -56,6 +66,11 @@ func main() {
 	if err := db.BootstrapAdmin(); err != nil {
 		log.Fatalf("admin bootstrap failed: %v", err)
 	}
+
+	// Runs for the life of the process; the ticker is stopped by the goroutine
+	// itself on context cancellation, which never happens today (the process
+	// exits instead) but keeps the function honest for tests and future use.
+	db.StartE2ERetentionSweep(context.Background(), 5*time.Minute)
 
 	r := gin.New()
 
@@ -71,9 +86,11 @@ func main() {
 	r.Use(middleware.SecurityHeaders())
 	r.Use(middleware.CORS())
 
-	// Credential endpoints get a tighter budget than the rest of the API.
-	authLimiter := middleware.NewRateLimiter(10, time.Minute)
-	apiLimiter := middleware.NewRateLimiter(300, time.Minute)
+	// Credential endpoints get a tighter budget than the rest of the API. Named
+	// so their Redis keys (shared across replicas, when configured) cannot
+	// collide with each other.
+	authLimiter := middleware.NewRateLimiter("auth", 10, time.Minute)
+	apiLimiter := middleware.NewRateLimiter("api", 300, time.Minute)
 
 	r.GET("/healthz", func(c *gin.Context) {
 		if err := db.DB.Ping(); err != nil {
@@ -90,6 +107,9 @@ func main() {
 	// 🔌 WebSocket hub
 	hub := websocket.NewHub()
 	go hub.Run()
+	// A no-op without Redis; with it, this is what lets a message reach a
+	// recipient connected to a different backend replica.
+	go hub.StartPubSub(context.Background())
 
 	// Authenticated by single-use ticket rather than the bearer token.
 	r.GET("/api/ws", websocket.HandleWebSocket(hub))
@@ -100,16 +120,27 @@ func main() {
 		protected.GET("/me", handlers.Me)
 		protected.POST("/ws-ticket", handlers.IssueWSTicket)
 
+		protected.GET("/contacts", handlers.ListContacts)
+		protected.POST("/contacts", handlers.AddContact)
+		protected.DELETE("/contacts/:id", handlers.RemoveContact)
+
 		protected.GET("/chats", handlers.GetChats)
 		protected.POST("/chats", handlers.CreateChat)
 		protected.GET("/chats/:id/messages", handlers.GetMessages)
 		protected.GET("/chats/:id/members", handlers.GetChatMembers)
 		protected.POST("/chats/:id/members", handlers.AddMember)
 		protected.GET("/chats/:id/keys", handlers.GetChatKeys)
-		protected.PUT("/chats/:id/e2e", handlers.SetChatE2E)
+		protected.POST("/chats/:id/e2e/request", handlers.RequestChatE2E)
+		protected.POST("/chats/:id/e2e/accept", handlers.AcceptChatE2E)
+		protected.POST("/chats/:id/e2e/reject", handlers.RejectChatE2E)
+		protected.PUT("/chats/:id/mute", handlers.SetChatMute)
 
 		protected.PUT("/profile/username", handlers.ChangeUsername)
 		protected.PUT("/profile/password", handlers.ChangePassword)
+		protected.POST("/profile/avatar", handlers.UploadAvatar)
+		protected.DELETE("/profile/avatar", handlers.DeleteAvatar)
+		protected.PUT("/profile/avatar-visibility", handlers.SetAvatarVisibility)
+		protected.GET("/avatars/:id", handlers.GetAvatar)
 
 		protected.POST("/keys", handlers.UploadKeys)
 		protected.GET("/keys/me", handlers.GetMyKeys)
@@ -129,6 +160,10 @@ func main() {
 			admin.DELETE("/users/:id", handlers.AdminDeleteUser)
 			admin.PUT("/users/:id/password", handlers.AdminResetPassword)
 			admin.PUT("/users/:id/role", handlers.AdminSetRole)
+
+			admin.GET("/settings/e2e-retention", handlers.AdminGetE2ERetention)
+			admin.PUT("/settings/e2e-retention", handlers.AdminSetE2ERetention)
+			admin.POST("/e2e/purge-now", handlers.AdminPurgeE2EMessages)
 		}
 	}
 

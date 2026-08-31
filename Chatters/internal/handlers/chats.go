@@ -117,6 +117,8 @@ type ChatResponse struct {
 	ID                string    `json:"id"`
 	IsGroup           bool      `json:"is_group"`
 	E2EEnabled        bool      `json:"e2e_enabled"`
+	E2EStatus         string    `json:"e2e_status"`
+	E2ERequestedBy    *string   `json:"e2e_requested_by,omitempty"`
 	Name              *string   `json:"name,omitempty"`
 	Members           []string  `json:"members"`
 	UnreadCount       int       `json:"unread_count"`
@@ -125,6 +127,7 @@ type ChatResponse struct {
 	LastMessageTime   *string   `json:"last_message_time,omitempty"`
 	LastMessageSender *string   `json:"last_message_sender,omitempty"`
 	LastIsEncrypted   bool      `json:"last_is_encrypted"`
+	Muted             bool      `json:"muted"`
 }
 
 func GetChats(c *gin.Context) {
@@ -160,6 +163,8 @@ func GetChats(c *gin.Context) {
 			c.id,
 			c.is_group,
 			c.e2e_enabled,
+			c.e2e_status,
+			c.e2e_requested_by,
 			c.name,
 			ARRAY_AGG(DISTINCT m.user_id) AS members,
 			COALESCE(s.unread_count, 0) AS unread_count,
@@ -167,15 +172,17 @@ func GetChats(c *gin.Context) {
 			lm.content,
 			lm.created_at,
 			lm.sender_id,
-			COALESCE(lm.is_encrypted, false)
+			COALESCE(lm.is_encrypted, false),
+			(cmt.user_id IS NOT NULL) AS muted
 		FROM chats c
 		JOIN chat_members m ON m.chat_id = c.id
 		LEFT JOIN stats s ON s.chat_id = c.id
 		LEFT JOIN last_msg lm ON lm.chat_id = c.id
+		LEFT JOIN chat_mutes cmt ON cmt.chat_id = c.id AND cmt.user_id = $1
 		WHERE c.id IN (SELECT chat_id FROM my_chats)
-		GROUP BY c.id, c.is_group, c.e2e_enabled, c.name, c.created_at,
-		         s.unread_count, s.last_activity,
-		         lm.content, lm.created_at, lm.sender_id, lm.is_encrypted
+		GROUP BY c.id, c.is_group, c.e2e_enabled, c.e2e_status, c.e2e_requested_by,
+		         c.name, c.created_at, s.unread_count, s.last_activity,
+		         lm.content, lm.created_at, lm.sender_id, lm.is_encrypted, cmt.user_id
 		ORDER BY
 			CASE WHEN COALESCE(s.unread_count, 0) > 0 THEN 0 ELSE 1 END,
 			COALESCE(s.last_activity, c.created_at) DESC
@@ -193,12 +200,14 @@ func GetChats(c *gin.Context) {
 		var chat ChatResponse
 		var lastActivity sql.NullTime
 		var lastMessageTime sql.NullTime
-		var lastMessage, lastMessageSender, groupName sql.NullString
+		var lastMessage, lastMessageSender, groupName, requestedBy sql.NullString
 
 		if err := rows.Scan(
 			&chat.ID,
 			&chat.IsGroup,
 			&chat.E2EEnabled,
+			&chat.E2EStatus,
+			&requestedBy,
 			&groupName,
 			pq.Array(&chat.Members),
 			&chat.UnreadCount,
@@ -207,6 +216,7 @@ func GetChats(c *gin.Context) {
 			&lastMessageTime,
 			&lastMessageSender,
 			&chat.LastIsEncrypted,
+			&chat.Muted,
 		); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read chats"})
 			return
@@ -214,6 +224,9 @@ func GetChats(c *gin.Context) {
 
 		if groupName.Valid {
 			chat.Name = &groupName.String
+		}
+		if requestedBy.Valid {
+			chat.E2ERequestedBy = &requestedBy.String
 		}
 		if lastActivity.Valid {
 			chat.LastActivity = lastActivity.Time

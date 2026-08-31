@@ -6,7 +6,7 @@ Chatters is a real-time messenger:
 - **Frontend** — React (Create React App), installable as a PWA. [frontend/](frontend)
 - **Reverse proxy** — nginx serves the React build and proxies `/login`, `/register`, `/api/*` and `/healthz` to the backend.
 
-Features: direct and group chats, file attachments, three-state delivery receipts, an admin panel, opt-in end-to-end encryption, and push notifications.
+Features: direct and group chats, contacts, profile photos, file attachments, three-state delivery receipts, chat muting, an admin panel, opt-in end-to-end encryption, and push notifications.
 
 ---
 
@@ -56,10 +56,43 @@ All settings live in `.env` (see [.env.example](.env.example)).
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | no | Web Push. Without them the app works normally but cannot notify a closed tab. Generate with `make vapid`. |
 | `ALLOWED_ORIGINS` | no | Extra browser origins allowed to call the API. Same-origin is always allowed, so this is only needed when the SPA and API are on different hostnames. |
 | `TRUSTED_PROXIES` | no | CIDRs whose `X-Forwarded-For` is believed. Defaults to the private ranges, which covers the bundled nginx. |
-| `MAX_UPLOAD_BYTES` | no | Upload cap, default 20 MiB. Keep in step with `client_max_body_size` in [frontend/nginx.conf](frontend/nginx.conf). |
+| `MAX_UPLOAD_BYTES` | no | Upload cap, default 20 MiB. Keep in step with `client_max_body_size` in [frontend/app-locations.conf](frontend/app-locations.conf). |
 | `HTTP_PORT` | no | Host port nginx binds to. Default 80. |
+| `REDIS_URL` | no | Set automatically by `docker-compose.yml` to the bundled Redis. See [Scaling out](#scaling-out) — every caller falls back to in-memory behaviour if this is unset, so it is not required for `go run` local development. |
 
 The database schema is created and updated by migrations that run on every boot ([Chatters/internal/db/migrate.go](Chatters/internal/db/migrate.go)). There is no separate migration step and no init script to drift out of sync — a fresh container and a long-lived production database take the same path.
+
+---
+
+## Scaling out
+
+By default this runs as one backend container, which is plenty for most deployments. If you outgrow it, `docker compose up -d --scale backend=N` adds more — Redis is what makes that actually work rather than just starting N containers that half-function:
+
+| Without Redis (single replica only) | With Redis (any number of replicas) |
+|---|---|
+| Rate limits and WebSocket tickets live in that one process's memory | Shared in Redis, so a login attempt or a ticket redemption is throttled/valid the same way no matter which replica handles it |
+| A message reaches a recipient only if their socket happens to be on the same process as the sender's | Every replica publishes to a Redis channel and subscribes to it, so a message from a user on replica A reaches a recipient on replica B |
+| "Is this user online" only sees connections on this process | Presence is a Redis set, shared across replicas |
+
+Nothing about this is visible day to day: `docker-compose.yml` ships Redis by default and wires `REDIS_URL` for you, so a single-replica deployment already uses it — it just does not need more than one replica to be correct. Every one of those code paths falls back to today's in-memory, single-process behaviour if `REDIS_URL` is empty (which it is for `go run ./cmd/server` outside Docker), so nothing about local development requires standing up Redis.
+
+One more piece has to cooperate: nginx's `proxy_pass http://backend:8080` would otherwise resolve that hostname once at startup and cache it, silently pinning every request to whichever single replica existed when nginx booted — scaling would do nothing. [frontend/app-locations.conf](frontend/app-locations.conf) routes through Docker's embedded DNS resolver instead (`resolver 127.0.0.11 valid=10s;` with the hostname in a variable) specifically so it keeps re-resolving and picks up replicas as they come and go.
+
+This was verified directly, not just read as correct: with two backend replicas, a message sent from a socket connected to replica 1 was received by a socket connected to replica 2 (and the reverse), and the delivery status correctly showed the recipient as online across replicas. Killing one replica outright, nginx kept serving successfully from the survivor once the 10-second resolver TTL passed.
+
+To reproduce that check yourself: bring the stack up, scale out, find each replica's address on the Docker network, then run [scripts/cross-instance-test.mjs](scripts/cross-instance-test.mjs) from a throwaway container on that same network (the container IPs are not reachable from the host directly, only from inside the network):
+
+```bash
+docker compose up -d --scale backend=2
+```
+
+```bash
+docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' chatters-backend-1 chatters-backend-2
+```
+
+```bash
+docker run --rm --network chatters_default -v "$(pwd)/scripts:/scripts" -w /scripts node:20-alpine sh -c "npm install ws --silent && node cross-instance-test.mjs <ip-1> <ip-2>"
+```
 
 ---
 
@@ -95,7 +128,9 @@ Self-service signup is **disabled** — the login screen used to say "ظرفیت
 
 ## End-to-end encryption
 
-Encryption is **per conversation and opt-in**. In a normal chat, press **🔒 Secure chat**. From that point the conversation opens on a separate secure page, and new messages are readable only by its members.
+Encryption is **per conversation, opt-in, and consensual**. In a normal chat, press **🔒 Secure chat** to send a request; the other member sees a banner at the top of the chat with **Accept** / **Reject**. Only once they accept does the chat open on a separate secure page for both of you. Neither side can switch it on unilaterally — that used to be possible, and it meant a compromised account could silently upgrade a conversation the other person never agreed to, at a time of the attacker's choosing.
+
+A rejected request resets the chat to normal and can be requested again later.
 
 ### How it works
 
@@ -118,6 +153,14 @@ The server stores ciphertext plus one wrapped key per recipient. It holds nothin
 - **Encryption cannot be switched off** once enabled — otherwise a compromised account could silently downgrade a conversation. Start a new chat instead.
 - **Changing your password issues a new key.** Existing secure messages stay readable only on devices that still hold the old key.
 - **Group chats are supported** (the message key is wrapped per member), but a member added later cannot read earlier messages.
+
+### Admin: data retention
+
+Admins can set an auto-delete window for encrypted chats in **🛠️ مدیریت → 🔒 Encrypted chat data retention**: never (default), 12 hours, 1 day, 3 days, or 7 days. A background sweep checks every few minutes and deletes messages older than the window, in every encrypted chat. There is also a **Delete all encrypted chats now** button for an immediate, one-off purge. Either way, only message content is removed — the chat and its encrypted status stay intact, and the setting takes effect on the next sweep rather than instantly.
+
+### Mute
+
+Any chat — direct or group — can be muted from its row in the chat list (🔔/🔕) or from inside the conversation. Muting is per-user: messages still arrive and count as unread as normal, only the push notification is suppressed. An end-to-end encryption *request* is never muted, since it needs a decision from you.
 
 ---
 
@@ -146,6 +189,21 @@ Colour is not an accessible signal on its own, so each of your messages also car
 
 ---
 
+## Contacts and profile photos
+
+**Contacts** are one-directional, like Telegram: adding someone populates your own "New chat" / "New group" picker and does not require (or notify) them adding you back. They are not a prerequisite for messaging — a chat can still be created directly by username — they just save retyping one you have already added.
+
+Add one from the **+** button on the chat list → **Add contact**. The same button's **New chat** and **New group** options pick from that list instead of a raw text field: tapping a contact in **New chat** creates the conversation and opens it immediately; **New group** is a multi-select plus a name field.
+
+**Profile photos** are managed in **👤 پروفایل → 📷 Profile photo** — JPEG, PNG, WebP or GIF, capped at 5 MB regardless of `MAX_UPLOAD_BYTES` (a profile picture has no business being tens of megabytes). Each user chooses who can see it:
+
+- **Everyone** (default) — any signed-in user.
+- **My contacts only** — visible to someone on *either* side of a contacts relationship with the owner (you added them, or they added you). This is a real access-control boundary enforced server-side on every fetch, not merely hidden in the UI, and it is **not** overridden by shared chat membership — being in a group with someone does not by itself entitle them to see a contacts-only photo.
+
+The server reports "no avatar" identically whether a user has none, or has one you are not permitted to see, so the response itself cannot be used to probe who has a contacts-only photo.
+
+---
+
 ## Notifications and PWA
 
 Chatters is installable and uses Web Push.
@@ -157,6 +215,19 @@ Turn notifications on in **👤 پروفایل → 🔔 Notifications**. This re
 Android and desktop Chrome/Edge/Firefox work in a regular tab, though installing still gives a better experience.
 
 To try this from a phone against a local checkout, see [Testing on a phone](#testing-on-a-phone) — plain HTTP will not do, because service workers need a secure context.
+
+### What triggers a notification, and what does not
+
+| Event | Notified when | Skipped when |
+|---|---|---|
+| New message (direct or group) | Recipient has no live connection | Recipient is online, has muted the chat, or is the sender |
+| New attachment (direct or group) | Same as above | Same as above |
+| E2E encryption request | Recipient has no live connection | Recipient is online, or is the requester — **never skipped for a muted chat**, since it needs a decision |
+| E2E accepted / rejected | Never pushed | Always — both sides see it live over the open connection; a push would arrive after the decision is already made |
+
+A **group** notification's title is the group's name, with the sender prefixed onto the body ("Alice: on my way") — a direct message's title is just the sender, since there is only the one person it could be. This was a real gap found while auditing these paths for groups specifically: every push used to be titled with the sender's username regardless of chat type, so a group message looked identical to a direct message from that person, and someone in several groups with the same person had no way to tell them apart. Attachments had the same gap and are fixed the same way.
+
+A second, more consequential bug from that same audit: **muting a chat silenced ordinary messages but not attachment uploads.** They go through separate code paths on the server, and only the message path checked mute (and online status) before pushing — attachments pushed unconditionally to every other member. Both paths now share the same check.
 
 ---
 
@@ -273,11 +344,13 @@ ADMIN_PASSWORD=your_admin_password BASE_URL=http://localhost node scripts/integr
 
 It deliberately reimplements the client side of the encryption protocol rather than importing the app's module, so the two implementations agreeing is real evidence the wire format is right.
 
-The suite finishes by deliberately tripping the login rate limiter, which is held in memory. Running it twice in a row therefore fails early with `401 missing token`, because the second run's sign-in is still throttled. Restart the backend between runs:
+The suite finishes by deliberately tripping the login rate limiter. Running it twice in a row therefore fails early with `401 missing token`, because the second run's sign-in is still throttled. With Redis running (the default via Docker Compose) that state lives in Redis, not in the backend process, so **restarting the backend does not clear it** — flush Redis instead:
 
 ```bash
-docker compose restart backend
+docker compose exec redis redis-cli FLUSHALL
 ```
+
+Without Redis (plain `go run`), the limiter is in-memory and restarting the backend clears it as before.
 
 To run the Go tests under the race detector (needs a Linux toolchain):
 
@@ -314,28 +387,29 @@ Chatters/                  Go backend (module "messenger")
   cmd/server/               entrypoint
   cmd/vapid/                Web Push key generator
   internal/auth/             JWT signing, single-use WebSocket tickets
+  internal/cache/             optional Redis connection (see Scaling out)
   internal/config/           environment configuration
-  internal/db/               connection, migrations, admin bootstrap
-  internal/handlers/         REST handlers
+  internal/db/               connection, migrations, admin bootstrap, E2E retention sweep
+  internal/handlers/         REST handlers (chats, contacts, avatars, admin, ...)
   internal/middleware/       auth, admin gate, rate limiting, CORS, headers
   internal/push/             Web Push delivery
   internal/validate/         input validation
-  internal/websocket/        hub, client pumps, upgrade handler
+  internal/websocket/        hub, Redis Pub/Sub fanout, client pumps, upgrade handler
 
 frontend/
   src/api/                   typed wrappers around the REST API
   src/crypto/                 end-to-end encryption + key storage
   src/hooks/useChat.js        load, live update, reconnect resync, send
-  src/components/             message list, composer, modals
+  src/components/             message list, composer, avatar, modals
   src/pages/                  Login, Register, ChatList, Chat, SecureChat,
                               Profile, Admin, Home
   src/services/websocket.js   reconnecting socket client
   public/sw.js                service worker (push + offline shell)
-  nginx.conf                  routing inside the frontend container
+  nginx.conf, app-locations.conf, nginx-tls.conf   routing inside the frontend container
 
 nginx/                     reference config for a bare-metal VPS deploy
-scripts/                   secret generation, integration tests
-docker-compose.yml         db + backend + frontend
+scripts/                   secret generation, integration + cross-instance tests
+docker-compose.yml         db + redis + backend + frontend
 Makefile                   shortcuts for everything above
 ```
 
@@ -353,7 +427,7 @@ Makefile                   shortcuts for everything above
 
 **Secure chat says "your encryption key is not available on this device"** — the key is unlocked at sign-in. Sign out and back in. After an admin password reset this is expected, and old encrypted messages will not come back.
 
-**Messages stop arriving** — look for the reconnection banner. If it stays up, check `make logs` for the backend and confirm your proxy forwards the `Upgrade`/`Connection` headers for `/api/ws` (see [frontend/nginx.conf](frontend/nginx.conf)).
+**Messages stop arriving** — look for the reconnection banner. If it stays up, check `make logs` for the backend and confirm your proxy forwards the `Upgrade`/`Connection` headers for `/api/ws` (see [frontend/app-locations.conf](frontend/app-locations.conf)).
 
 ---
 

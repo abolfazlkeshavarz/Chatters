@@ -1,11 +1,13 @@
 package websocket
 
 import (
+	"database/sql"
 	"encoding/json"
 	"log"
 	"sync"
 	"time"
 
+	"messenger/internal/cache"
 	"messenger/internal/db"
 	"messenger/internal/push"
 	"messenger/internal/validate"
@@ -88,12 +90,13 @@ func NewHub() *Hub {
 
 func (h *Hub) Register(c *Client) {
 	h.mu.Lock()
-	defer h.mu.Unlock()
-
 	if h.clients[c.UserID] == nil {
 		h.clients[c.UserID] = make(map[*Client]bool)
 	}
 	h.clients[c.UserID][c] = true
+	h.mu.Unlock()
+
+	h.markOnline(c.UserID, c.id)
 }
 
 // Unregister removes one specific connection, leaving the user's other
@@ -108,13 +111,30 @@ func (h *Hub) Unregister(c *Client) {
 	}
 	h.mu.Unlock()
 
+	h.markOffline(c.UserID, c.id)
+
 	// Signalled outside the lock, and via the client's own done channel rather
 	// than by closing Send, so concurrent fan-out cannot send on a closed
 	// channel.
 	c.close()
 }
 
+// IsOnline reports whether userID has a live connection anywhere. With Redis
+// configured this checks presence shared across every replica; without it,
+// only this process's own connections are visible, which is correct for a
+// single-process deployment and degrades safely (a user on another replica
+// would read as offline, at worst causing one redundant push notification —
+// never a missed message, since delivery itself goes through dispatch/Redis
+// pub/sub regardless of what IsOnline reports).
 func (h *Hub) IsOnline(userID string) bool {
+	if cache.Enabled() {
+		online, err := isOnlineShared(userID)
+		if err == nil {
+			return online
+		}
+		log.Printf("websocket: redis presence check failed, falling back to local: %v", err)
+	}
+
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.clients[userID]) > 0
@@ -171,9 +191,14 @@ func (h *Hub) handleIncoming(msg ChatMessage) {
 	}
 
 	// A chat marked end-to-end encrypted must not accept cleartext, or a
-	// tampered client could silently downgrade the conversation.
-	var e2eEnabled bool
-	if err := db.DB.QueryRow(`SELECT e2e_enabled FROM chats WHERE id = $1`, msg.ChatID).Scan(&e2eEnabled); err != nil {
+	// tampered client could silently downgrade the conversation. is_group and
+	// name are fetched here too so a push notification can say which group a
+	// message is in — see pushToOffline.
+	var e2eEnabled, isGroup bool
+	var chatName sql.NullString
+	if err := db.DB.QueryRow(
+		`SELECT e2e_enabled, is_group, name FROM chats WHERE id = $1`, msg.ChatID,
+	).Scan(&e2eEnabled, &isGroup, &chatName); err != nil {
 		return
 	}
 	if e2eEnabled != msg.IsEncrypted {
@@ -243,10 +268,10 @@ func (h *Hub) handleIncoming(msg ChatMessage) {
 		if err != nil {
 			continue
 		}
-		h.sendTo(userID, data)
+		h.dispatch(userID, data)
 	}
 
-	h.pushToOffline(msg, members, id)
+	h.pushToOffline(msg, members, isGroup, chatName.String)
 }
 
 // persist writes the message and, for encrypted chats, one wrapped key row per
@@ -301,7 +326,16 @@ func (h *Hub) persist(msg ChatMessage, members []string) (int, time.Time, error)
 // pushToOffline wakes up recipients who have no live socket. Encrypted chats
 // get a content-free notification, because the server genuinely cannot read
 // the message.
-func (h *Hub) pushToOffline(msg ChatMessage, members []string, id int) {
+//
+// A group notification is titled with the group, not the sender: found while
+// auditing notifications for groups that every push — direct or group — used
+// the sender's username as the title with nothing identifying which
+// conversation it was in. Someone in several groups with the same person had
+// no way to tell them apart from the notification alone, and even a single
+// shared group looked identical to a direct message from that person. A
+// direct chat still leads with the sender, since there is only the one
+// person it could be.
+func (h *Hub) pushToOffline(msg ChatMessage, members []string, isGroup bool, chatName string) {
 	if !push.Enabled() {
 		return
 	}
@@ -313,16 +347,25 @@ func (h *Hub) pushToOffline(msg ChatMessage, members []string, id int) {
 		body = body[:120] + "…"
 	}
 
+	title := msg.From
+	if isGroup {
+		title = chatName
+		if title == "" {
+			title = "Group chat"
+		}
+		body = msg.From + ": " + body
+	}
+
 	n := push.Notification{
 		Type:   "message",
-		Title:  msg.From,
+		Title:  title,
 		Body:   body,
 		ChatID: msg.ChatID,
 		From:   msg.From,
 	}
 
 	for _, userID := range members {
-		if userID == msg.From || h.IsOnline(userID) {
+		if userID == msg.From || h.IsOnline(userID) || db.IsChatMuted(msg.ChatID, userID) {
 			continue
 		}
 		push.SendToUser(userID, n)
@@ -347,7 +390,20 @@ func (h *Hub) BroadcastStatus(chatID, status string, messageIDs []int) {
 	}
 
 	for _, userID := range h.chatMembers(chatID) {
-		h.sendTo(userID, payload)
+		h.dispatch(userID, payload)
+	}
+}
+
+// BroadcastEvent sends an arbitrary JSON event to every member of a chat.
+// Used for state changes that are not a chat message — an E2E encryption
+// request, its acceptance or rejection.
+func (h *Hub) BroadcastEvent(chatID string, payload map[string]interface{}) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	for _, userID := range h.chatMembers(chatID) {
+		h.dispatch(userID, data)
 	}
 }
 
@@ -411,7 +467,7 @@ func (h *Hub) BroadcastMedia(chatID string, messageID int, filename, mimeType, f
 	}
 
 	for _, userID := range h.chatMembers(chatID) {
-		h.sendTo(userID, payload)
+		h.dispatch(userID, payload)
 	}
 }
 

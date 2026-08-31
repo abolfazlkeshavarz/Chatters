@@ -25,6 +25,7 @@ type Config struct {
 	AdminPassword   string
 	AdminEmail      string
 	TrustedProxies  []string
+	RedisURL        string
 }
 
 var C Config
@@ -78,6 +79,7 @@ func Load() {
 		AdminPassword:   os.Getenv("ADMIN_PASSWORD"),
 		AdminEmail:      os.Getenv("ADMIN_EMAIL"),
 		TrustedProxies:  trustedProxies(),
+		RedisURL:        os.Getenv("REDIS_URL"),
 	}
 }
 

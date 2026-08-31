@@ -111,62 +111,6 @@ func GetChatKeys(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"members": members, "without_keys": missing})
 }
 
-// SetChatE2E turns end-to-end encryption on for a chat. It is deliberately
-// one-way: allowing it to be switched off would let a compromised account
-// silently downgrade a conversation the other side believes is protected.
-func SetChatE2E(c *gin.Context) {
-	chatID := c.Param("id")
-	userID := c.GetString("user_id")
-
-	if !isChatMember(chatID, userID) {
-		c.JSON(http.StatusForbidden, gin.H{"error": "not a chat member"})
-		return
-	}
-
-	var req struct {
-		Enabled bool `json:"enabled"`
-	}
-	if err := c.ShouldBindJSON(&req); err != nil {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
-		return
-	}
-	if !req.Enabled {
-		c.JSON(http.StatusBadRequest, gin.H{
-			"error": "encryption cannot be disabled once enabled; create a new chat instead",
-		})
-		return
-	}
-
-	// Every member needs a published public key or some of them would be
-	// unable to read anything sent afterwards.
-	var withoutKeys int
-	err := db.DB.QueryRow(
-		`SELECT COUNT(*)
-		 FROM chat_members cm
-		 JOIN users u ON u.id = cm.user_id
-		 WHERE cm.chat_id = $1 AND (u.public_key IS NULL OR u.public_key = '')`,
-		chatID,
-	).Scan(&withoutKeys)
-
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify member keys"})
-		return
-	}
-	if withoutKeys > 0 {
-		c.JSON(http.StatusConflict, gin.H{
-			"error": "every member must sign in once to publish an encryption key before this chat can be secured",
-		})
-		return
-	}
-
-	if _, err := db.DB.Exec(`UPDATE chats SET e2e_enabled = true WHERE id = $1`, chatID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to enable encryption"})
-		return
-	}
-
-	c.JSON(http.StatusOK, gin.H{"status": "ok", "e2e_enabled": true})
-}
-
 func isChatMember(chatID, userID string) bool {
 	var ok bool
 	err := db.DB.QueryRow(

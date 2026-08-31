@@ -16,6 +16,9 @@ Chatters/server
 frontend/node_modules/
 frontend/build/
 frontend/coverage/
+scripts/node_modules/
+scripts/package.json
+scripts/package-lock.json
 
 # IDE
 .idea/

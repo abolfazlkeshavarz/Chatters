@@ -89,6 +89,29 @@ async function api(path, { method = "GET", body, token, expect } = {}) {
   return { status: res.status, data };
 }
 
+async function apiUpload(path, { token, expect, fields = {}, file } = {}) {
+  const form = new FormData();
+  for (const [k, v] of Object.entries(fields)) form.append(k, v);
+  if (file) form.append("file", new Blob([file.data], { type: file.type }), file.name);
+
+  const headers = {};
+  if (token) headers.Authorization = `Bearer ${token}`;
+
+  const res = await fetch(BASE + path, { method: "POST", headers, body: form });
+  const text = await res.text();
+  let data = null;
+  try {
+    data = text ? JSON.parse(text) : null;
+  } catch {
+    data = text;
+  }
+
+  if (expect !== undefined && res.status !== expect) {
+    throw new Error(`POST ${path} returned ${res.status}, expected ${expect}: ${text.slice(0, 200)}`);
+  }
+  return { status: res.status, data };
+}
+
 /* ------------------------------------------- encryption (reimplemented) */
 
 const b64 = (buf) => Buffer.from(buf).toString("base64");
@@ -446,6 +469,163 @@ await check("a wrapped private key round-trips through the server", async () => 
   );
 });
 
+section("Contacts");
+
+await check("a contact can be added and appears in the list", async () => {
+  await api("/api/contacts", { method: "POST", token: aliceToken, body: { username: BOB }, expect: 200 });
+
+  const { data } = await api("/api/contacts", { token: aliceToken, expect: 200 });
+  assert(data.contacts.some((c) => c.id === BOB), "bob should be in alice's contacts");
+});
+
+await check("contacts are one-directional", async () => {
+  // Alice added Bob; that must not make Bob see Alice as a contact.
+  const { data } = await api("/api/contacts", { token: bobToken, expect: 200 });
+  assert(!data.contacts.some((c) => c.id === ALICE), "bob should not automatically have alice as a contact");
+});
+
+await check("adding the same contact twice is refused", async () => {
+  await api("/api/contacts", { method: "POST", token: aliceToken, body: { username: BOB }, expect: 409 });
+});
+
+await check("adding yourself is refused", async () => {
+  await api("/api/contacts", { method: "POST", token: aliceToken, body: { username: ALICE }, expect: 400 });
+});
+
+await check("adding a nonexistent user is refused", async () => {
+  await api("/api/contacts", {
+    method: "POST",
+    token: aliceToken,
+    body: { username: `nobody_${stamp}` },
+    expect: 404,
+  });
+});
+
+await check("a contact can be removed", async () => {
+  await api(`/api/contacts/${BOB}`, { method: "DELETE", token: aliceToken, expect: 200 });
+
+  const { data } = await api("/api/contacts", { token: aliceToken, expect: 200 });
+  assert(!data.contacts.some((c) => c.id === BOB), "bob should be gone after removal");
+
+  // Removing again: nothing left to remove.
+  await api(`/api/contacts/${BOB}`, { method: "DELETE", token: aliceToken, expect: 404 });
+});
+
+await check("contacts require authentication", async () => {
+  await api("/api/contacts", { expect: 401 });
+});
+
+section("Profile photos");
+
+// A tiny valid PNG (1x1, transparent) - real image bytes, not a text fixture
+// pretending to be one, so an eventual server-side content sniff would still
+// pass.
+const PNG_1PX = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=",
+  "base64"
+);
+
+await check("uploading a non-image is rejected", async () => {
+  await apiUpload("/api/profile/avatar", {
+    token: aliceToken,
+    file: { data: Buffer.from("not an image"), type: "text/plain", name: "evil.txt" },
+    expect: 415,
+  });
+});
+
+await check("uploading an oversized file is rejected", async () => {
+  await apiUpload("/api/profile/avatar", {
+    token: aliceToken,
+    file: { data: Buffer.alloc(6 * 1024 * 1024), type: "image/png", name: "huge.png" },
+    expect: 413,
+  });
+});
+
+await check("a valid image can be uploaded", async () => {
+  await apiUpload("/api/profile/avatar", {
+    token: aliceToken,
+    file: { data: PNG_1PX, type: "image/png", name: "me.png" },
+    expect: 200,
+  });
+
+  const { data } = await api("/api/me", { token: aliceToken, expect: 200 });
+  assertEqual(data.has_avatar, true, "has_avatar after upload");
+  assertEqual(data.avatar_visibility, "public", "default visibility");
+});
+
+await check("the owner can always fetch their own avatar", async () => {
+  const res = await fetch(`${BASE}/api/avatars/${ALICE}`, {
+    headers: { Authorization: `Bearer ${aliceToken}` },
+  });
+  assertEqual(res.status, 200, "owner fetching their own avatar");
+  assertEqual(res.headers.get("content-type"), "image/png", "content type");
+});
+
+await check("a public avatar is visible to anyone signed in", async () => {
+  const res = await fetch(`${BASE}/api/avatars/${ALICE}`, { headers: { Authorization: `Bearer ${bobToken}` } });
+  assertEqual(res.status, 200, "public avatar visible to a non-contact");
+});
+
+await check("switching to contacts-only hides it from a non-contact", async () => {
+  await api("/api/profile/avatar-visibility", {
+    method: "PUT",
+    token: aliceToken,
+    body: { visibility: "contacts" },
+    expect: 200,
+  });
+
+  // Bob is not (any longer) one of Alice's contacts, from the earlier section.
+  const res = await fetch(`${BASE}/api/avatars/${ALICE}`, { headers: { Authorization: `Bearer ${bobToken}` } });
+  assertEqual(res.status, 404, "contacts-only avatar hidden from a non-contact");
+
+  // The owner can still always see their own.
+  const own = await fetch(`${BASE}/api/avatars/${ALICE}`, { headers: { Authorization: `Bearer ${aliceToken}` } });
+  assertEqual(own.status, 200, "owner still sees their own contacts-only avatar");
+});
+
+await check("adding the contact back makes it visible again", async () => {
+  await api("/api/contacts", { method: "POST", token: bobToken, body: { username: ALICE }, expect: 200 });
+
+  const res = await fetch(`${BASE}/api/avatars/${ALICE}`, { headers: { Authorization: `Bearer ${bobToken}` } });
+  assertEqual(res.status, 200, "visible once bob has alice as a contact (either direction counts)");
+
+  await api(`/api/contacts/${ALICE}`, { method: "DELETE", token: bobToken, expect: 200 });
+});
+
+await check("an invalid visibility value is rejected", async () => {
+  await api("/api/profile/avatar-visibility", {
+    method: "PUT",
+    token: aliceToken,
+    body: { visibility: "friends" },
+    expect: 400,
+  });
+});
+
+await check("deleting the avatar removes it", async () => {
+  await api("/api/profile/avatar", { method: "DELETE", token: aliceToken, expect: 200 });
+
+  const { data } = await api("/api/me", { token: aliceToken, expect: 200 });
+  assertEqual(data.has_avatar, false, "has_avatar after deletion");
+
+  const res = await fetch(`${BASE}/api/avatars/${ALICE}`, { headers: { Authorization: `Bearer ${aliceToken}` } });
+  assertEqual(res.status, 404, "no avatar left to serve");
+});
+
+await check("a user with no avatar returns 404, not a crash", async () => {
+  const res = await fetch(`${BASE}/api/avatars/${BOB}`, { headers: { Authorization: `Bearer ${aliceToken}` } });
+  assertEqual(res.status, 404, "bob has never uploaded one");
+});
+
+await check("avatar endpoints require authentication", async () => {
+  await api("/api/profile/avatar-visibility", {
+    method: "PUT",
+    body: { visibility: "public" },
+    expect: 401,
+  });
+  const res = await fetch(`${BASE}/api/avatars/${ALICE}`);
+  assertEqual(res.status, 401, "unauthenticated avatar fetch");
+});
+
 section("Chat access control");
 
 await check("a chat can be created", async () => {
@@ -457,6 +637,19 @@ await check("a chat can be created", async () => {
   });
   chatId = data.chat_id;
   assert(chatId, "no chat id returned");
+});
+
+// Regression test for a bug found while building avatar uploads: an
+// oversized multipart body trips http.MaxBytesReader mid-parse, so
+// c.FormFile() itself fails - which the handler was reporting as a generic
+// 400 "file required" instead of the 413 a client could actually act on.
+await check("an oversized attachment is rejected with 413, not 400", async () => {
+  await apiUpload(`/api/media`, {
+    token: aliceToken,
+    fields: { chat_id: chatId },
+    file: { data: Buffer.alloc(25 * 1024 * 1024), type: "image/png", name: "huge.png" },
+    expect: 413,
+  });
 });
 
 await check("creating a chat with an unknown user fails cleanly", async () => {
@@ -744,23 +937,76 @@ await check("a non-member cannot post into the chat over the socket", async () =
 
 section("End-to-end encrypted conversation");
 
-await check("encryption can be switched on for a chat", async () => {
-  const { data } = await api(`/api/chats/${chatId}/e2e`, {
-    method: "PUT",
+// Encryption is a consent handshake, not a unilateral switch: one side
+// requests it, and only the OTHER side can accept or reject. This used to be
+// a single PUT that either member could flip on alone.
+
+await check("a member cannot accept or reject with no pending request", async () => {
+  await api(`/api/chats/${chatId}/e2e/accept`, { method: "POST", token: bobToken, expect: 409 });
+  await api(`/api/chats/${chatId}/e2e/reject`, { method: "POST", token: bobToken, expect: 409 });
+});
+
+await check("requesting notifies the other member over the socket", async () => {
+  const { data } = await api(`/api/chats/${chatId}/e2e/request`, {
+    method: "POST",
     token: aliceToken,
-    body: { enabled: true },
+    expect: 200,
+  });
+  assertEqual(data.status, "pending", "request status");
+
+  const seen = await bobSock.wait((m) => m.type === "e2e_request" && m.chat_id === chatId);
+  assertEqual(seen.by, ALICE, "requester");
+});
+
+await check("a second request while one is pending is refused", async () => {
+  await api(`/api/chats/${chatId}/e2e/request`, { method: "POST", token: aliceToken, expect: 409 });
+});
+
+await check("the requester cannot accept or reject their own request", async () => {
+  await api(`/api/chats/${chatId}/e2e/accept`, { method: "POST", token: aliceToken, expect: 409 });
+  await api(`/api/chats/${chatId}/e2e/reject`, { method: "POST", token: aliceToken, expect: 409 });
+});
+
+await check("rejecting notifies the requester and resets the chat", async () => {
+  await api(`/api/chats/${chatId}/e2e/reject`, { method: "POST", token: bobToken, expect: 200 });
+
+  const seen = await aliceSock.wait((m) => m.type === "e2e_rejected" && m.chat_id === chatId);
+  assertEqual(seen.by, BOB, "rejector");
+
+  const { data } = await api("/api/chats", { token: aliceToken, expect: 200 });
+  const row = data.find((c) => c.id === chatId);
+  assertEqual(row.e2e_status, "none", "status after rejection");
+  assertEqual(row.e2e_enabled, false, "chat must stay unencrypted after a rejection");
+});
+
+await check("a chat can be requested again after a rejection", async () => {
+  const { data } = await api(`/api/chats/${chatId}/e2e/request`, {
+    method: "POST",
+    token: aliceToken,
+    expect: 200,
+  });
+  assertEqual(data.status, "pending", "request status");
+  await bobSock.wait((m) => m.type === "e2e_request" && m.chat_id === chatId);
+});
+
+await check("accepting turns encryption on and notifies both sides", async () => {
+  const { data } = await api(`/api/chats/${chatId}/e2e/accept`, {
+    method: "POST",
+    token: bobToken,
     expect: 200,
   });
   assertEqual(data.e2e_enabled, true, "e2e flag");
+
+  const seenByAlice = await aliceSock.wait((m) => m.type === "e2e_accepted" && m.chat_id === chatId);
+  assertEqual(seenByAlice.by, BOB, "acceptor");
+
+  const { data: chats } = await api("/api/chats", { token: bobToken, expect: 200 });
+  const row = chats.find((c) => c.id === chatId);
+  assertEqual(row.e2e_status, "accepted", "status after acceptance");
 });
 
-await check("encryption cannot be switched back off", async () => {
-  await api(`/api/chats/${chatId}/e2e`, {
-    method: "PUT",
-    token: aliceToken,
-    body: { enabled: false },
-    expect: 400,
-  });
+await check("encryption cannot be requested again once accepted", async () => {
+  await api(`/api/chats/${chatId}/e2e/request`, { method: "POST", token: aliceToken, expect: 409 });
 });
 
 await check("member public keys are published to members only", async () => {
@@ -825,6 +1071,99 @@ await check("a cleartext message is refused in an encrypted chat", async () => {
 
 await check("an outsider gets no key material even if they see the chat id", async () => {
   await api(`/api/chats/${chatId}/messages`, { token: malloryToken, expect: 403 });
+});
+
+section("Muting a chat");
+
+await check("a chat can be muted and unmuted", async () => {
+  await api(`/api/chats/${chatId}/mute`, {
+    method: "PUT",
+    token: bobToken,
+    body: { muted: true },
+    expect: 200,
+  });
+
+  let { data } = await api("/api/chats", { token: bobToken, expect: 200 });
+  assertEqual(data.find((c) => c.id === chatId).muted, true, "muted after muting");
+
+  // Alice's own view is unaffected: muting is per-user, not per-chat.
+  ({ data } = await api("/api/chats", { token: aliceToken, expect: 200 }));
+  assertEqual(data.find((c) => c.id === chatId).muted, false, "the other member must not see it as muted");
+
+  await api(`/api/chats/${chatId}/mute`, {
+    method: "PUT",
+    token: bobToken,
+    body: { muted: false },
+    expect: 200,
+  });
+
+  ({ data } = await api("/api/chats", { token: bobToken, expect: 200 }));
+  assertEqual(data.find((c) => c.id === chatId).muted, false, "muted after unmuting");
+});
+
+section("Admin: E2E retention and purge");
+
+await check("retention defaults to never (0)", async () => {
+  const { data } = await api("/api/admin/settings/e2e-retention", { token: adminToken, expect: 200 });
+  assertEqual(data.retention_seconds, 0, "default retention");
+});
+
+await check("retention can be changed and rejects an out-of-range value", async () => {
+  await api("/api/admin/settings/e2e-retention", {
+    method: "PUT",
+    token: adminToken,
+    body: { retention_seconds: 3600 },
+    expect: 200,
+  });
+
+  const { data } = await api("/api/admin/settings/e2e-retention", { token: adminToken, expect: 200 });
+  assertEqual(data.retention_seconds, 3600, "retention after update");
+
+  await api("/api/admin/settings/e2e-retention", {
+    method: "PUT",
+    token: adminToken,
+    body: { retention_seconds: -1 },
+    expect: 400,
+  });
+
+  // Restore the default so it does not affect any later test run's chats.
+  await api("/api/admin/settings/e2e-retention", {
+    method: "PUT",
+    token: adminToken,
+    body: { retention_seconds: 0 },
+    expect: 200,
+  });
+});
+
+await check("purge-now deletes encrypted messages but keeps the chat encrypted", async () => {
+  const { data: before } = await api(`/api/chats/${chatId}/messages`, { token: aliceToken, expect: 200 });
+  const encryptedBefore = before.filter((m) => m.is_encrypted).length;
+  assert(encryptedBefore > 0, "test setup: there should be encrypted messages to purge");
+
+  const { data: purge } = await api("/api/admin/e2e/purge-now", {
+    method: "POST",
+    token: adminToken,
+    expect: 200,
+  });
+  assert(purge.deleted >= encryptedBefore, "reported deletion count looks too low");
+
+  const { data: after } = await api(`/api/chats/${chatId}/messages`, { token: aliceToken, expect: 200 });
+  assertEqual(after.filter((m) => m.is_encrypted).length, 0, "encrypted messages should be gone");
+
+  // The chat's encrypted status itself is untouched — only content is cleared.
+  const { data: chats } = await api("/api/chats", { token: aliceToken, expect: 200 });
+  assertEqual(chats.find((c) => c.id === chatId).e2e_enabled, true, "chat must remain encrypted after a purge");
+});
+
+await check("non-admins cannot read or change retention, or trigger a purge", async () => {
+  await api("/api/admin/settings/e2e-retention", { token: aliceToken, expect: 403 });
+  await api("/api/admin/settings/e2e-retention", {
+    method: "PUT",
+    token: aliceToken,
+    body: { retention_seconds: 1 },
+    expect: 403,
+  });
+  await api("/api/admin/e2e/purge-now", { method: "POST", token: aliceToken, expect: 403 });
 });
 
 section("Session invalidation");

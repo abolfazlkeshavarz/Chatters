@@ -130,16 +130,22 @@ func Me(c *gin.Context) {
 	userID := c.GetString("user_id")
 	isAdmin, _ := c.Get("is_admin")
 
-	var hasKeys bool
+	var hasKeys, hasAvatar bool
+	var avatarVisibility string
 	_ = db.DB.QueryRow(
-		`SELECT public_key IS NOT NULL AND public_key <> '' FROM users WHERE id = $1`,
+		`SELECT public_key IS NOT NULL AND public_key <> '',
+		        avatar_path IS NOT NULL AND avatar_path <> '',
+		        avatar_visibility
+		 FROM users WHERE id = $1`,
 		userID,
-	).Scan(&hasKeys)
+	).Scan(&hasKeys, &hasAvatar, &avatarVisibility)
 
 	c.JSON(http.StatusOK, gin.H{
-		"user_id":  userID,
-		"username": userID,
-		"is_admin": isAdmin == true,
-		"has_keys": hasKeys,
+		"user_id":           userID,
+		"username":          userID,
+		"is_admin":          isAdmin == true,
+		"has_keys":          hasKeys,
+		"has_avatar":        hasAvatar,
+		"avatar_visibility": avatarVisibility,
 	})
 }

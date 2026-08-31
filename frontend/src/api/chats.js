@@ -31,8 +31,22 @@ export function getChatKeys(chatId) {
   return api.get(`/api/chats/${encodeURIComponent(chatId)}/keys`);
 }
 
-export function enableE2E(chatId) {
-  return api.put(`/api/chats/${encodeURIComponent(chatId)}/e2e`, {
-    enabled: true,
-  });
+/**
+ * Consent handshake for turning on end-to-end encryption. Neither side can
+ * enable it alone: one side requests, the other accepts or rejects.
+ */
+export function requestE2E(chatId) {
+  return api.post(`/api/chats/${encodeURIComponent(chatId)}/e2e/request`);
+}
+
+export function acceptE2E(chatId) {
+  return api.post(`/api/chats/${encodeURIComponent(chatId)}/e2e/accept`);
+}
+
+export function rejectE2E(chatId) {
+  return api.post(`/api/chats/${encodeURIComponent(chatId)}/e2e/reject`);
+}
+
+export function setChatMute(chatId, muted) {
+  return api.put(`/api/chats/${encodeURIComponent(chatId)}/mute`, { muted });
 }

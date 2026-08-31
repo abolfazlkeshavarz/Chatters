@@ -33,3 +33,15 @@ export function setRole(userId, isAdmin) {
     is_admin: isAdmin,
   });
 }
+
+export function getE2ERetention() {
+  return api.get("/api/admin/settings/e2e-retention");
+}
+
+export function setE2ERetention(seconds) {
+  return api.put("/api/admin/settings/e2e-retention", { retention_seconds: seconds });
+}
+
+export function purgeE2EMessages() {
+  return api.post("/api/admin/e2e/purge-now");
+}

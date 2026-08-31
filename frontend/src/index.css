@@ -23,28 +23,43 @@
 }
 
 :root {
-  --bg: #f5f5f7;
+  /* A distinct indigo rather than the generic system-blue every default iOS
+     app ships with — this is the single change with the widest reach, since
+     nearly every screen already reads its accent colour from --primary
+     rather than hardcoding one. */
+  --bg: #f4f5f9;
   --card: #ffffff;
-  --border: #e5e5ea;
-  --text: #1c1c1e;
-  --subtext: #6e6e73;
-  --primary: #007aff;
+  --card-raised: #ffffff;
+  --border: #e3e5ec;
+  --text: #17181d;
+  --subtext: #6b6f7d;
+  --primary: #5457e5;
+  --primary-hover: #4548d4;
   --primary-contrast: #ffffff;
-  --danger: #ff3b30;
-  --success: #34c759;
-  --unread-bg: #eef3ff;
-  --bubble-in: #e5e5ea;
-  --bubble-in-text: #000000;
-  --overlay: rgba(0, 0, 0, 0.45);
-  --secure: #30b06a;
+  --danger: #ef4444;
+  --success: #22b573;
+  --unread-bg: #eeeefd;
+  --bubble-in: #eceef3;
+  --bubble-in-text: #17181d;
+  --overlay: rgba(17, 18, 24, 0.5);
+  --secure: #16a367;
+  --secure-bg: #e6f7ee;
 
   /* Outgoing bubbles are coloured by delivery state: white while the message
      is only on the server, blue once it reaches the recipient's device, green
      once they have actually read it. The border is what keeps the white state
      legible against the near-white page background. */
   --bubble-sent: #ffffff;
-  --bubble-sent-text: #1c1c1e;
-  --bubble-sent-border: #c7c7cc;
+  --bubble-sent-text: #17181d;
+  --bubble-sent-border: #d8dae2;
+
+  /* Elevation: flat borders read as dated next to soft shadows, but shadows
+     alone wash out in dark mode, so cards and the border both stay — the
+     shadow adds depth, the border keeps an edge where the shadow is too
+     faint to read against a busy background. */
+  --shadow-sm: 0 1px 2px rgba(23, 24, 29, 0.06), 0 1px 1px rgba(23, 24, 29, 0.04);
+  --shadow-md: 0 4px 16px rgba(23, 24, 29, 0.08), 0 2px 6px rgba(23, 24, 29, 0.05);
+  --shadow-lg: 0 16px 48px rgba(23, 24, 29, 0.18), 0 4px 12px rgba(23, 24, 29, 0.08);
 
   /* Notch / home-indicator padding; resolves to 0 where unsupported. */
   --safe-top: env(safe-area-inset-top, 0px);
@@ -55,17 +70,21 @@
   --header-h: 56px;
   --radius: 14px;
   --max-content: 1100px;
+  --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #000000;
-    --card: #1c1c1e;
-    --border: #38383a;
+    --bg: #0b0c10;
+    --card: #17181e;
+    --card-raised: #1d1f27;
+    --border: #2a2c36;
     --text: #f2f2f7;
-    --subtext: #98989f;
-    --unread-bg: #16233a;
-    --bubble-in: #2c2c2e;
+    --subtext: #9498a8;
+    --primary: #7376f0;
+    --primary-hover: #8689f5;
+    --unread-bg: #1e2040;
+    --bubble-in: #24262f;
     --bubble-in-text: #f2f2f7;
     --overlay: rgba(0, 0, 0, 0.7);
 
@@ -74,6 +93,11 @@
     --bubble-sent: #e9e9ed;
     --bubble-sent-text: #1c1c1e;
     --bubble-sent-border: #e9e9ed;
+    --secure-bg: #10281c;
+
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+    --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.45);
+    --shadow-lg: 0 16px 48px rgba(0, 0, 0, 0.55);
   }
 }
 
@@ -140,11 +164,20 @@ button {
   touch-action: manipulation;
   border: none;
   background: none;
+  transition: background-color 0.15s var(--ease), color 0.15s var(--ease),
+    border-color 0.15s var(--ease), box-shadow 0.15s var(--ease),
+    transform 0.1s var(--ease), opacity 0.15s var(--ease);
 }
 
 button:disabled {
   cursor: not-allowed;
   opacity: 0.55;
+}
+
+/* A press should feel pressed. Skipped for anything already disabled or
+   opted out (a full-width list row uses its own hover treatment instead). */
+button:not(:disabled):active {
+  transform: scale(0.97);
 }
 
 /* 16px minimum stops iOS Safari zooming in when a field is focused. */
@@ -156,14 +189,28 @@ select {
   color: var(--text);
   background: var(--card);
   border: 1px solid var(--border);
+  transition: border-color 0.15s var(--ease), box-shadow 0.15s var(--ease);
 }
 
 input:focus-visible,
 textarea:focus-visible,
+select:focus-visible,
 button:focus-visible {
   outline: 2px solid var(--primary);
   outline-offset: 2px;
 }
+
+/* A calmer, more deliberate focus ring than the default outline for text
+   entry specifically — the outline above still covers keyboard navigation
+   everywhere else. */
+input:focus,
+textarea:focus,
+select:focus {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+
 
 /* ---------------------------------------------------------------- layout */
 
@@ -199,6 +246,20 @@ button:focus-visible {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
+  /* Thin, unobtrusive scrollbar on desktop; mobile browsers overlay their own
+     and ignore this. */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border) transparent;
+}
+.scroll-area::-webkit-scrollbar {
+  width: 8px;
+}
+.scroll-area::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 8px;
+}
+.scroll-area::-webkit-scrollbar-thumb:hover {
+  background: var(--subtext);
 }
 
 .container {
@@ -254,6 +315,9 @@ button:focus-visible {
   border-bottom: 1px solid var(--border);
   background: var(--card);
   flex-shrink: 0;
+  position: relative;
+  z-index: 1;
+  box-shadow: var(--shadow-sm);
 }
 
 /* ------------------------------------------------------------ components */
@@ -263,6 +327,28 @@ button:focus-visible {
   border: 1px solid var(--border);
   border-radius: var(--radius);
   padding: 14px;
+  box-shadow: var(--shadow-sm);
+}
+
+/* A clickable row (a chat, a contact) inside a list — gives the same kind of
+   hover/press feedback a native <button> gets for free, which these rows
+   cannot use directly since several of them contain a real nested button
+   (e.g. the per-chat mute toggle) and nested buttons are invalid HTML. */
+.list-row {
+  cursor: pointer;
+  transition: background-color 0.12s var(--ease), transform 0.1s var(--ease);
+}
+
+/* !important is the only way to win against the row's own inline
+   background-color (it sets one dynamically for the unread/selected state),
+   since inline styles otherwise beat any stylesheet rule regardless of
+   specificity. */
+.list-row:hover {
+  background: var(--unread-bg) !important;
+}
+
+.list-row:active {
+  transform: scale(0.99);
 }
 
 .field {
@@ -280,17 +366,31 @@ button:focus-visible {
   font-size: 15px;
   font-weight: 500;
   min-height: 44px;
+  box-shadow: var(--shadow-sm);
+}
+
+.btn:not(:disabled):hover {
+  background: var(--primary-hover);
 }
 
 .btn-secondary {
   background: var(--card);
   color: var(--primary);
   border: 1px solid var(--border);
+  box-shadow: none;
+}
+
+.btn-secondary:not(:disabled):hover {
+  background: var(--unread-bg);
 }
 
 .btn-danger {
   background: var(--danger);
   color: #fff;
+}
+
+.btn-danger:not(:disabled):hover {
+  background: #dc2626;
 }
 
 .btn-block {
@@ -307,7 +407,7 @@ button:focus-visible {
 }
 
 .badge-secure {
-  background: rgba(48, 176, 106, 0.15);
+  background: color-mix(in srgb, var(--secure) 15%, transparent);
   color: var(--secure);
 }
 
@@ -342,6 +442,7 @@ button:focus-visible {
   padding-top: calc(16px + var(--safe-top));
   padding-bottom: calc(16px + var(--safe-bottom));
   z-index: 1000;
+  animation: overlay-in 0.18s var(--ease);
 }
 
 .modal {
@@ -352,6 +453,21 @@ button:focus-visible {
   max-height: 100%;
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
+  box-shadow: var(--shadow-lg);
+  animation: modal-in 0.2s var(--ease);
+}
+
+@keyframes overlay-in {
+  from {
+    opacity: 0;
+  }
+}
+
+@keyframes modal-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.98);
+  }
 }
 
 /* Tables scroll sideways on small screens rather than breaking the layout. */

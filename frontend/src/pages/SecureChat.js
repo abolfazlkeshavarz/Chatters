@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useChat } from "../hooks/useChat";
-import { getChatKeys } from "../api/chats";
+import { getChatKeys, setChatMute } from "../api/chats";
+import Avatar from "../components/Avatar";
 import { loadIdentity } from "../crypto/keystore";
 import { safetyNumber, isSupported } from "../crypto/e2ee";
 import MessageList from "../components/MessageList";
@@ -15,7 +16,7 @@ import ConnectionBanner from "../components/ConnectionBanner";
  * ciphertext plus one wrapped key per recipient, so neither the operator nor
  * the admin panel can read these messages.
  */
-export default function SecureChat({ chatId, title, onBack }) {
+export default function SecureChat({ chatId, title, chat, onBack, onChatPatch }) {
   const me = localStorage.getItem("username");
 
   const [identity, setIdentity] = useState(null);
@@ -96,6 +97,8 @@ export default function SecureChat({ chatId, title, onBack }) {
           </button>
         )}
 
+        {!chat?.is_group && <Avatar userId={title} size={32} />}
+
         <div style={styles.titleBox}>
           <div style={styles.title}>
             <span aria-hidden="true">🔒 </span>
@@ -103,6 +106,22 @@ export default function SecureChat({ chatId, title, onBack }) {
           </div>
           <div style={styles.subtitle}>End-to-end encrypted</div>
         </div>
+
+        <button
+          onClick={async () => {
+            const next = !chat?.muted;
+            onChatPatch?.({ muted: next });
+            try {
+              await setChatMute(chatId, next);
+            } catch {
+              onChatPatch?.({ muted: !next });
+            }
+          }}
+          title={chat?.muted ? "Unmute notifications" : "Mute notifications"}
+          style={styles.muteBtn}
+        >
+          {chat?.muted ? "🔕" : "🔔"}
+        </button>
 
         {fingerprint && (
           <button
@@ -179,6 +198,14 @@ export default function SecureChat({ chatId, title, onBack }) {
 const styles = {
   header: { borderBottom: "1px solid var(--secure)" },
   back: { fontSize: 24, minWidth: 40, padding: 8 },
+  muteBtn: {
+    border: "none",
+    background: "none",
+    fontSize: 18,
+    padding: 8,
+    cursor: "pointer",
+    lineHeight: 1,
+  },
   titleBox: { flex: 1, minWidth: 0 },
   title: {
     fontSize: 16,
