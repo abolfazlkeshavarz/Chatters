@@ -1,5 +1,6 @@
 .PHONY: help env secrets vapid up lan certs https tunnel down restart build logs ps clean db-shell backend-shell \
-        test backend-test frontend-test backend-build frontend-install frontend-build
+        test backend-test frontend-test backend-build frontend-install frontend-build \
+        bootstrap check-ports install-docker
 
 COMPOSE = docker compose
 
@@ -13,6 +14,11 @@ COMPOSE_HTTPS = docker compose -f docker-compose.yml -f docker-compose.https.yml
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@echo ""
+	@echo "  VPS quick start (from scratch, or alongside another project): make bootstrap"
+	@echo "  VPS quick start (manual):  make env -> make secrets -> edit .env -> make up"
+	@echo "  Local quick start (phone testing, no domain):  make lan  /  make https"
+	@echo ""
 
 ## --- Setup ---
 
@@ -32,6 +38,26 @@ secrets: env ## Generate JWT_SECRET and VAPID keys into .env (only fills empty v
 
 vapid: ## Print a fresh Web Push VAPID key pair
 	cd Chatters && go run ./cmd/vapid
+
+## --- VPS deployment ---
+
+bootstrap: ## Full zero-to-deployed setup on a fresh (or shared) Ubuntu/Debian VPS
+	@bash scripts/bootstrap-vps.sh
+
+check-ports: ## Check whether ports 80/443 are free, or already used by another project
+	@bash scripts/check-ports.sh
+
+install-docker: ## Install Docker Engine + Compose v2 plugin (needs sudo/root)
+	@test "$$(id -u)" = "0" || { echo "This command must be run with sudo: sudo make install-docker"; exit 1; }
+	@install -m 0755 -d /etc/apt/keyrings
+	@curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+	@chmod a+r /etc/apt/keyrings/docker.asc
+	@. /etc/os-release && echo "deb [arch=$$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu $$VERSION_CODENAME stable" > /etc/apt/sources.list.d/docker.list
+	@apt-get update
+	@apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+	@systemctl enable --now docker
+	@echo "Docker installed."
+	@docker compose version
 
 ## --- Docker deployment ---
 

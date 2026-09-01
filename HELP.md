@@ -98,12 +98,19 @@ docker run --rm --network chatters_default -v "$(pwd)/scripts:/scripts" -w /scri
 
 ## Deploying to a server
 
-1. Install Docker and Compose, clone the repo.
-2. `make env && make secrets`, then edit `.env`: set `POSTGRES_PASSWORD`, `ADMIN_USERNAME`, `ADMIN_PASSWORD`.
-3. `make up`.
-4. Put HTTPS in front of it. **This matters for more than privacy:** service workers, push notifications and Web Crypto all require a secure context, so notifications and secure chat will not work over plain HTTP (except on `localhost`).
+See [DEPLOY.md](DEPLOY.md) for the full walkthrough (server hardening, Docker install, HTTPS, backups). The short version, for a server dedicated to Chatters:
 
-The simplest route is host nginx + certbot in front of the container port — [nginx/chatters](nginx/chatters) is a working reference for that, and [README.md](README.md) documents a full non-Docker VPS install.
+```bash
+git clone https://github.com/abolfazlkeshavarz/Chatters.git /opt/chatters && cd /opt/chatters
+```
+
+```bash
+./scripts/bootstrap-vps.sh
+```
+
+That installs Docker if needed, creates `.env` with generated secrets, and deploys. **Already running another Docker project on this server?** Same command — it detects if ports 80/443 are taken and adapts automatically (binds Chatters to a localhost-only port instead, and prints exactly what to add to whichever server already owns 80/443). See DEPLOY.md's [Appendix C](DEPLOY.md#appendix-c--deploying-alongside-another-project). Run `make check-ports` any time to check that on its own.
+
+Either way, HTTPS matters for more than privacy: service workers, push notifications and Web Crypto all require a secure context, so notifications and secure chat will not work over plain HTTP (except on `localhost`).
 
 Health endpoint for load balancers: `GET /healthz` → `{"status":"ok"}`.
 

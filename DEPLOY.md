@@ -30,6 +30,8 @@ That must print your server's IP. If it prints nothing, wait and try again — c
 
 > **Why HTTPS is not optional here.** End-to-end encryption uses the Web Crypto API and notifications use service workers. Browsers expose neither outside a secure context. Over plain HTTP, Chatters runs but secure chat and notifications are permanently unavailable.
 
+> **Already running another Docker project on this server?** Ports 80/443 can only belong to one thing at a time, so the walkthrough below — which has Chatters own them directly — does not apply as-is. Skip to [Appendix C](#appendix-c--deploying-alongside-another-project) instead; `make bootstrap` there detects the conflict automatically and adapts.
+
 ---
 
 ## Part 1 — Secure the server
@@ -656,6 +658,102 @@ Keep the host patched:
 ```bash
 sudo apt update && sudo apt upgrade -y
 ```
+
+---
+
+## Appendix C — Deploying alongside another project
+
+For a server that already runs a different project in Docker — its own `docker-compose.yml`, its own containers, quite possibly its own dockerized nginx already sitting on ports 80/443.
+
+**The one thing that actually matters here is ports.** Everything else Compose does — container names, networks, volumes — is already namespaced by project name, so a second, differently-named project on the same Docker daemon cannot collide with the first one by accident. Ports are the exception: they are a single shared, host-wide resource, and two processes — containerized or not, related or not — cannot both bind :80.
+
+### The automated path
+
+```bash
+git clone https://github.com/abolfazlkeshavarz/Chatters.git /opt/chatters
+```
+
+```bash
+cd /opt/chatters
+```
+
+```bash
+./scripts/bootstrap-vps.sh
+```
+
+It installs Docker if it is not already there (harmless to run even when it is — Docker itself happily hosts any number of independent compose projects side by side), asks for your domain and an admin username, then checks `ports 80 and 443`:
+
+- **Free** — Chatters binds them directly, same as the [main walkthrough](#part-6--https). This is the case where nothing else is on the box yet.
+- **Already in use** — the actual point of this appendix. It picks the first free port from 8091 up, binds Chatters to `127.0.0.1:THAT_PORT` (never `0.0.0.0` — never reachable from the internet directly), deploys, and **prints the exact nginx server block and certbot command** to wire your domain into whatever already owns 80/443. It does not edit that other project's files itself — you paste in what it prints.
+
+You can run the same port check on its own at any time:
+
+```bash
+make check-ports
+```
+
+### What "wire it in" means, concretely
+
+Say Chatters ends up on `127.0.0.1:8091` and your domain is `chat.example.com`. Two things need to happen on whatever already owns 80/443 — most often that other project's own containerized nginx, matching the `web` + `certbot` pattern several Docker project templates use:
+
+**1. A new server block**, proxying the whole domain to Chatters:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name chat.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/chat.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/chat.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8091;
+        proxy_http_version 1.1;
+
+        # $host, not a variant that strips the port: Chatters checks that a
+        # request's Origin matches its Host, so this has to be exactly what
+        # the browser sees or every request is rejected as cross-origin.
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # Required for live messaging (WebSocket).
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_read_timeout 86400;
+        proxy_send_timeout 86400;
+    }
+}
+```
+
+Chatters does its own internal routing (API, WebSocket, static files) behind this single block — the other project's nginx only needs to be a plain pipe to `127.0.0.1:8091`, not reimplement any of that.
+
+Where exactly this block goes depends on how that project structures its nginx config — check its `docker-compose.yml` for what's mounted into its web/nginx service. `bootstrap-vps.sh` prints this same block with your actual domain and port already filled in, plus the matching plain-HTTP block that redirects to it and answers the ACME challenge.
+
+**2. A certificate for the new domain.** If that other project already runs its own certbot container against a webroot (as the block above assumes), the cheapest way to get one is to reuse it — run this **from that other project's own directory**, so it reuses its existing certbot image and its `/etc/letsencrypt` volume:
+
+```bash
+docker compose run --rm --entrypoint "certbot certonly --webroot -w /var/www/certbot --email you@example.com -d chat.example.com --agree-tos --no-eff-email" certbot
+```
+
+(Adjust the webroot path if that project uses a different one — check its nginx config for the `location /.well-known/acme-challenge/` block.) Its regular `certbot renew` — already scheduled for its own domain — renews this one too from then on: `certbot renew` renews everything it finds under `/etc/letsencrypt/live/`, not just the domain it was first set up for. Nothing extra to maintain.
+
+If that other project does *not* already have its own certbot, or you would rather keep the two fully independent, get the certificate with a one-off standalone certbot run instead — this only needs port 80 free for a few seconds, which is fine even while the other project's nginx is up, since certbot can share the challenge briefly via the webroot method as long as the new domain's plain-HTTP server block (part 1, above) is already in place to serve it:
+
+```bash
+sudo apt install -y certbot
+```
+
+```bash
+sudo certbot certonly --webroot -w /var/www/YOUR_WEBROOT -d chat.example.com
+```
+
+Point that path at wherever the plain-HTTP block above serves `/.well-known/acme-challenge/` from, and set up its own renewal (`sudo certbot renew --dry-run` to test, then a cron/systemd timer — `apt install certbot` usually adds one automatically).
+
+### Why not just run Chatters' own nginx on 80/443 instead?
+
+Because something already is. This is not a Chatters limitation — it is true of *any* two independent web-facing Docker projects on one server: exactly one process gets to hold each of those ports, full stop. The pattern above (one edge proxy per port, everything else on `127.0.0.1:*`) is the standard way around that, and it is also exactly what the [main walkthrough](#part-6--https) already does for the single-project case — there, Chatters' own container is the thing on `127.0.0.1:8080` and a host-installed nginx is the edge. Sharing a server just means a *pre-existing* edge does that job instead of a fresh one, for both projects at once.
 
 ---
 

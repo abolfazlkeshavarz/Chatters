@@ -1,3 +1,11 @@
+# Pinned explicitly rather than left to default to the checkout directory's
+# name: Compose namespaces every container, network and volume by project
+# name, so on a server that also runs other Docker projects, an implicit name
+# is one `git clone` into a differently-named folder away from colliding with
+# something else. Pinning it here means that can never happen, regardless of
+# what the directory is called.
+name: chatters
+
 services:
   db:
     image: postgres:16-alpine
