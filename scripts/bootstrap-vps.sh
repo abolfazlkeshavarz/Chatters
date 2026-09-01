@@ -76,6 +76,47 @@ if [[ -z "${ADMIN_USERNAME:-}" ]]; then
 fi
 : "${ADMIN_USERNAME:?ADMIN_USERNAME is required}"
 
+# The backend's boot-time admin bootstrap hashes whatever ADMIN_PASSWORD it is
+# given without checking its strength (unlike the registration/admin-create
+# API paths, which do) — so a too-short password typed here would otherwise
+# be accepted silently. 8 characters mirrors validate.Password's own minimum.
+if [[ -z "${ADMIN_PASSWORD:-}" ]]; then
+  while true; do
+    read -r -s -p "Password for the first administrator account (min 8 characters): " ADMIN_PASSWORD
+    echo
+    if [[ ${#ADMIN_PASSWORD} -lt 8 ]]; then
+      echo "  Too short - needs at least 8 characters. Try again."
+      continue
+    fi
+    read -r -s -p "Confirm password: " ADMIN_PASSWORD_CONFIRM
+    echo
+    if [[ "$ADMIN_PASSWORD" != "$ADMIN_PASSWORD_CONFIRM" ]]; then
+      echo "  Passwords did not match. Try again."
+      continue
+    fi
+    unset ADMIN_PASSWORD_CONFIRM
+    break
+  done
+fi
+: "${ADMIN_PASSWORD:?ADMIN_PASSWORD is required}"
+
+# --------------------------------------------------------- build mirrors
+#
+# Only affects docker compose build (Go module downloads, npm install) — not
+# anything at runtime. Skippable non-interactively with MIRRORS=1 or MIRRORS=0,
+# matching the flag other Chatters-adjacent tooling uses for the same purpose.
+if [[ -z "${MIRRORS:-}" ]]; then
+  read -r -p "Use package mirrors (package-mirror.liara.ir) for the Go/npm build, e.g. for a network where the real registries are slow or blocked? [y/N] " reply
+  [[ "$reply" == "y" || "$reply" == "Y" ]] && MIRRORS=1 || MIRRORS=0
+fi
+
+if [[ "$MIRRORS" == "1" ]]; then
+  echo "==> Using package-mirror.liara.ir for the Go and npm build"
+  GOPROXY="https://package-mirror.liara.ir/repository/go/,direct"
+  GOSUMDB="off"
+  NPM_REGISTRY="https://package-mirror.liara.ir/repository/npm/"
+fi
+
 # --------------------------------------------------- port conflict detection
 #
 # The one question that decides everything else: is anything already on
@@ -112,11 +153,14 @@ else
 fi
 
 sed -i "s|^ADMIN_USERNAME=.*|ADMIN_USERNAME=${ADMIN_USERNAME}|" .env
-if [[ -z "${ADMIN_PASSWORD:-}" ]]; then
-  ADMIN_PASSWORD="$(openssl rand -base64 18 | tr -d '\n/+=' | cut -c1-18)"
-fi
 sed -i "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=${ADMIN_PASSWORD}|" .env
 sed -i "s|^ADMIN_EMAIL=.*|ADMIN_EMAIL=admin@${DOMAIN}|" .env
+
+if [[ "$MIRRORS" == "1" ]]; then
+  sed -i "s|^GOPROXY=.*|GOPROXY=${GOPROXY}|" .env
+  sed -i "s|^GOSUMDB=.*|GOSUMDB=${GOSUMDB}|" .env
+  sed -i "s|^NPM_REGISTRY=.*|NPM_REGISTRY=${NPM_REGISTRY}|" .env
+fi
 
 if [[ "$REAL_USER" != "root" ]]; then
   chown "$REAL_USER":"$REAL_USER" .env

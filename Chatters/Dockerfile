@@ -1,6 +1,16 @@
 # --- Build stage ---
 FROM golang:1.24-alpine AS build
 
+# Overridable so a build on a network where proxy.golang.org / sum.golang.org
+# are slow or blocked (e.g. some Iranian ISPs) can point at a mirror instead
+# — set GOPROXY and GOSUMDB in .env; docker-compose.yml passes them through.
+# Left at Go's real defaults otherwise, so a plain "docker compose build"
+# with no .env customisation still works exactly as before.
+ARG GOPROXY=https://proxy.golang.org,direct
+ARG GOSUMDB=sum.golang.org
+ENV GOPROXY=${GOPROXY}
+ENV GOSUMDB=${GOSUMDB}
+
 WORKDIR /src
 
 RUN apk add --no-cache git

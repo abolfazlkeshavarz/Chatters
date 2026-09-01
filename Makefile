@@ -1,6 +1,6 @@
 .PHONY: help env secrets vapid up lan certs https tunnel down restart build logs ps clean db-shell backend-shell \
         test backend-test frontend-test backend-build frontend-install frontend-build \
-        bootstrap check-ports install-docker
+        bootstrap check-ports install-docker mirrors mirrors-go mirrors-npm
 
 COMPOSE = docker compose
 
@@ -11,6 +11,13 @@ LAN_PORT ?= 8080
 HTTPS_PORT ?= 8443
 
 COMPOSE_HTTPS = docker compose -f docker-compose.yml -f docker-compose.https.yml
+
+# Mirrors for a network where the real Go/npm registries are slow or blocked
+# (e.g. some Iranian ISPs). Used by "make mirrors" (host toolchain, for local
+# `go`/`npm` commands) and offered interactively by "make bootstrap" (Docker
+# build args, via GOPROXY/NPM_REGISTRY in .env — see .env.example).
+GO_PROXY := https://package-mirror.liara.ir/repository/go/
+NPM_REGISTRY_MIRROR := https://package-mirror.liara.ir/repository/npm/
 
 help: ## Show this help
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-18s\033[0m %s\n", $$1, $$2}'
@@ -58,6 +65,23 @@ install-docker: ## Install Docker Engine + Compose v2 plugin (needs sudo/root)
 	@systemctl enable --now docker
 	@echo "Docker installed."
 	@docker compose version
+
+mirrors: mirrors-go mirrors-npm ## Set Go/npm to use the Liara mirrors, for this user's host toolchain
+	@echo ""
+	@echo "Go and npm mirrors set for local commands (go build, npm install, etc)."
+	@echo "For the Docker build to use them too, set GOPROXY/GOSUMDB/NPM_REGISTRY in .env"
+	@echo "(bootstrap-vps.sh offers to do this for you), then: make build"
+
+mirrors-go: ## Set the Go modules mirror for the current user's host toolchain
+	@if ! command -v go >/dev/null 2>&1; then echo "go is not installed; skipped."; exit 0; fi
+	go env -w GOPROXY=$(GO_PROXY),direct
+	go env -w GOSUMDB=off
+	@echo "go mirror set: $(GO_PROXY)"
+
+mirrors-npm: ## Set the npm registry mirror (global, for the current user)
+	@if ! command -v npm >/dev/null 2>&1; then echo "npm is not installed; skipped."; exit 0; fi
+	npm config set registry $(NPM_REGISTRY_MIRROR) --global
+	@echo "npm mirror set: $(NPM_REGISTRY_MIRROR)"
 
 ## --- Docker deployment ---
 

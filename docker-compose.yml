@@ -43,6 +43,11 @@ services:
   backend:
     build:
       context: ./Chatters
+      args:
+        # Go module mirror, for a network where proxy.golang.org is slow or
+        # blocked. Empty/unset in .env falls through to Go's real defaults.
+        GOPROXY: ${GOPROXY:-https://proxy.golang.org,direct}
+        GOSUMDB: ${GOSUMDB:-sum.golang.org}
     restart: unless-stopped
     environment:
       DB_HOST: db
@@ -91,6 +96,10 @@ services:
   frontend:
     build:
       context: ./frontend
+      args:
+        # npm registry mirror, for a network where registry.npmjs.org is slow
+        # or blocked. Empty/unset in .env falls through to npm's real default.
+        NPM_REGISTRY: ${NPM_REGISTRY:-https://registry.npmjs.org}
     restart: unless-stopped
     ports:
       - "${HTTP_PORT:-80}:80"

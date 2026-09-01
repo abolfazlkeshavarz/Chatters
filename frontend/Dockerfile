@@ -1,10 +1,17 @@
 # --- Build stage ---
 FROM node:20-alpine AS build
 
+# Overridable so a build on a network where registry.npmjs.org is slow or
+# blocked (e.g. some Iranian ISPs) can point at a mirror instead — set
+# NPM_REGISTRY in .env; docker-compose.yml passes it through. Left at npm's
+# real default otherwise, so a plain "docker compose build" with no .env
+# customisation still works exactly as before.
+ARG NPM_REGISTRY=https://registry.npmjs.org
+
 WORKDIR /app
 
 COPY package.json package-lock.json ./
-RUN npm install --no-audit --no-fund
+RUN npm config set registry "$NPM_REGISTRY" && npm install --no-audit --no-fund
 
 COPY public ./public
 COPY src ./src
