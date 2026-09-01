@@ -12,6 +12,10 @@ Chatters/private_uploads/
 Chatters/chatters-server
 Chatters/server
 
+# Image bundles built by scripts/build-images.sh for transport to a server
+dist/
+chatters-images.tar.gz
+
 # Node / React
 frontend/node_modules/
 frontend/build/

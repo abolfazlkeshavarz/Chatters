@@ -168,12 +168,29 @@ fi
 chmod 600 .env
 
 # --------------------------------------------------------------- deploy
-echo "==> Building images and bringing the system up"
-docker compose build
+#
+# If the images are already here — loaded from a bundle built on a bigger
+# machine (scripts/load-images.sh) — don't rebuild them. Building the
+# frontend needs roughly 1.5 GB of RAM, which a small VPS does not
+# necessarily have, so on those the whole point is to never build here.
+if docker image inspect chatters-backend:latest >/dev/null 2>&1 \
+   && docker image inspect chatters-frontend:latest >/dev/null 2>&1; then
+  echo "==> Prebuilt images found; skipping the build"
+  BUILD_ARGS=(--no-build)
+else
+  echo "==> Building images (no prebuilt images found)"
+  echo "    On a small server this can be slow, and the frontend build may run"
+  echo "    out of memory. If it fails, build on a bigger machine instead:"
+  echo "    see DEPLOY.md, \"Building elsewhere\"."
+  docker compose build
+  BUILD_ARGS=()
+fi
+
+echo "==> Bringing the system up"
 # --wait blocks until every service with a healthcheck reports healthy (db,
 # redis, backend) rather than returning as soon as the containers start,
 # so the summary printed below is trustworthy rather than optimistic.
-docker compose up -d --wait
+docker compose up -d --wait "${BUILD_ARGS[@]}"
 
 echo ""
 echo "================================================================"

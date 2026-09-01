@@ -16,7 +16,7 @@ For day-to-day usage, features and configuration reference, see [HELP.md](HELP.m
 
 You need three things:
 
-1. **A server** with a public IP. 2 GB RAM is the practical minimum — the frontend image is built on the server and the JavaScript build alone wants roughly 1.5 GB. (1 GB works if you add swap; see [Appendix A](#appendix-a--low-memory-servers).)
+1. **A server** with a public IP. 2 GB RAM is the practical minimum *if you build on the server* — the JavaScript build alone wants roughly 1.5 GB. A smaller or single-core box is fine as long as you build the images on your own machine and copy them across instead, which is usually the better approach anyway; see [Appendix A](#appendix-a--low-memory-servers-and-building-elsewhere).
 2. **A domain name** you control.
 3. **A DNS `A` record** pointing your domain at the server's IP, created *before* you request a certificate.
 
@@ -593,7 +593,7 @@ The key unlocks at sign-in. Sign out and back in. After an admin password reset 
 
 **Build killed during `make up`**
 
-Out of memory. See [Appendix A](#appendix-a--low-memory-servers).
+Out of memory — the frontend build needs ~1.5 GB. Either build on your own machine and copy the images over, or add swap: see [Appendix A](#appendix-a--low-memory-servers-and-building-elsewhere).
 
 **Certificate renewal failing**
 
@@ -605,9 +605,63 @@ Port 80 must stay open and reachable — certbot uses it to prove domain control
 
 ---
 
-## Appendix A — Low-memory servers
+## Appendix A — Low-memory servers, and building elsewhere
 
-The React build needs roughly 1.5 GB. On a 1 GB server, add 2 GB of swap first:
+Building the images needs real resources: the React build alone wants roughly 1.5 GB of RAM, and the Go build is CPU-bound. A small VPS — one core, 1 GB — will be slow at best, and the frontend build can get OOM-killed outright.
+
+Two ways around it. **Building elsewhere is the better one** if you have any reasonably specced machine to hand, because the server then never compiles anything at all.
+
+### Option 1 — Build on your own machine, ship the images (recommended)
+
+Works from Windows, macOS or Linux; all it needs is Docker. No registry account, no external service — a single tarball you copy across.
+
+**On your machine**, from the project root:
+
+```bash
+make build-images
+```
+
+That builds both images for `linux/amd64` (override with `PLATFORM=linux/arm64` if your server is ARM), checks they really came out as that architecture, and packs them into `dist/chatters-images.tar.gz` — about **64 MB**. It works on a fresh clone with no `.env`, using a throwaway one just to satisfy Compose and deleting it afterwards; nothing from it is baked into the images.
+
+**Copy it over:**
+
+```bash
+scp dist/chatters-images.tar.gz YOUR_USER@YOUR_SERVER:/opt/chatters/
+```
+
+**On the server:**
+
+```bash
+cd /opt/chatters && ./scripts/load-images.sh
+```
+
+It loads both images and refuses if their architecture does not match the server — that mismatch is worth catching here, because it otherwise loads perfectly happily and only fails later at container start with a bare `exec format error`, which is a miserable thing to debug remotely.
+
+Then start it. First-time setup (creates `.env`, checks ports, prompts for the admin account) — it detects the loaded images and skips building automatically:
+
+```bash
+./scripts/bootstrap-vps.sh
+```
+
+Or, if `.env` already exists from a previous deploy:
+
+```bash
+make up-prebuilt
+```
+
+`up-prebuilt` passes `--no-build`, so a missing image fails loudly instead of silently starting a build the server cannot finish.
+
+**Updating later** is the same three steps: `make build-images` on your machine, `scp`, then `./scripts/load-images.sh && make up-prebuilt` on the server.
+
+**About the base images:** `postgres` and `redis` are pulled from Docker Hub on the server rather than bundled, since they need no building. If you run the attendance system on the same box, `postgres:16-alpine` is *already there* — it uses the identical image — so only `redis:7-alpine` (~15 MB) is a new pull. If the server cannot reach Docker Hub at all, bundle them too:
+
+```bash
+INCLUDE_BASE=1 make build-images
+```
+
+### Option 2 — Add swap and build on the server anyway
+
+If you would rather not involve a second machine, give the server enough memory to finish the build:
 
 ```bash
 sudo fallocate -l 2G /swapfile && sudo chmod 600 /swapfile && sudo mkswap /swapfile && sudo swapon /swapfile
@@ -625,7 +679,7 @@ Confirm:
 free -h
 ```
 
-Building will be slow but will finish. Alternatively build the images on a bigger machine, push them to a registry, and pull them here.
+Building will be slow — swap is orders of magnitude slower than RAM — but it will finish.
 
 ---
 

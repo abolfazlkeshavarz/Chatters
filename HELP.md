@@ -110,6 +110,8 @@ git clone https://github.com/abolfazlkeshavarz/Chatters.git /opt/chatters && cd 
 
 That installs Docker if needed, creates `.env` with generated secrets, and deploys. **Already running another Docker project on this server?** Same command — it detects if ports 80/443 are taken and adapts automatically (binds Chatters to a localhost-only port instead, and prints exactly what to add to whichever server already owns 80/443). See DEPLOY.md's [Appendix C](DEPLOY.md#appendix-c--deploying-alongside-another-project). Run `make check-ports` any time to check that on its own.
 
+**Server too small to build on?** The frontend build wants ~1.5 GB of RAM, which a 1-core VPS may not survive. Build on your own machine instead and copy the images across — `make build-images`, `scp`, then `./scripts/load-images.sh && make up-prebuilt` on the server. `bootstrap-vps.sh` detects prebuilt images and skips building. See DEPLOY.md's [Appendix A](DEPLOY.md#appendix-a--low-memory-servers-and-building-elsewhere).
+
 Either way, HTTPS matters for more than privacy: service workers, push notifications and Web Crypto all require a secure context, so notifications and secure chat will not work over plain HTTP (except on `localhost`).
 
 Health endpoint for load balancers: `GET /healthz` → `{"status":"ok"}`.

@@ -1,6 +1,7 @@
 .PHONY: help env secrets vapid up lan certs https tunnel down restart build logs ps clean db-shell backend-shell \
         test backend-test frontend-test backend-build frontend-install frontend-build \
-        bootstrap check-ports install-docker mirrors mirrors-go mirrors-npm
+        bootstrap check-ports install-docker mirrors mirrors-go mirrors-npm \
+        build-images load-images up-prebuilt
 
 COMPOSE = docker compose
 
@@ -82,6 +83,18 @@ mirrors-npm: ## Set the npm registry mirror (global, for the current user)
 	@if ! command -v npm >/dev/null 2>&1; then echo "npm is not installed; skipped."; exit 0; fi
 	npm config set registry $(NPM_REGISTRY_MIRROR) --global
 	@echo "npm mirror set: $(NPM_REGISTRY_MIRROR)"
+
+## --- Building elsewhere (for a server too small to build on) ---
+
+build-images: ## [dev machine] Build images and pack them into dist/ to carry to the server
+	@bash scripts/build-images.sh
+
+load-images: ## [server] Load the image bundle copied from your machine
+	@bash scripts/load-images.sh
+
+up-prebuilt: env ## [server] Start the stack from already-loaded images, never building
+	$(COMPOSE) up -d --no-build --wait
+	@$(COMPOSE) ps
 
 ## --- Docker deployment ---
 
