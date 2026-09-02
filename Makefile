@@ -1,6 +1,6 @@
 .PHONY: help env secrets vapid up lan certs https tunnel down restart build logs ps clean db-shell backend-shell \
         test backend-test frontend-test backend-build frontend-install frontend-build \
-        bootstrap check-ports install-docker mirrors mirrors-go mirrors-npm \
+        bootstrap check-ports nginx nginx-config install-docker mirrors mirrors-go mirrors-npm \
         build-images load-images up-prebuilt
 
 COMPOSE = docker compose
@@ -44,8 +44,16 @@ env: ## Create .env from .env.example if it does not exist yet
 secrets: env ## Generate JWT_SECRET and VAPID keys into .env (only fills empty values)
 	@bash scripts/gen-secrets.sh
 
+# Falls back to the built image so this also works on a server that has no Go
+# toolchain, which is the normal case when images are built elsewhere.
 vapid: ## Print a fresh Web Push VAPID key pair
-	cd Chatters && go run ./cmd/vapid
+	@if command -v go >/dev/null 2>&1; then \
+		cd Chatters && go run ./cmd/server -vapid; \
+	elif docker image inspect chatters-backend:latest >/dev/null 2>&1; then \
+		docker run --rm chatters-backend:latest -vapid; \
+	else \
+		echo "Needs either Go, or the chatters-backend image (./scripts/load-images.sh)."; exit 1; \
+	fi
 
 ## --- VPS deployment ---
 
@@ -54,6 +62,12 @@ bootstrap: ## Full zero-to-deployed setup on a fresh (or shared) Ubuntu/Debian V
 
 check-ports: ## Check whether ports 80/443 are free, or already used by another project
 	@bash scripts/check-ports.sh
+
+nginx: ## Configure host nginx + Let's Encrypt for this app's subdomain (needs sudo)
+	@bash scripts/setup-nginx.sh
+
+nginx-config: ## Print the nginx config that would be installed, without changing anything
+	@RENDER_ONLY=1 bash scripts/setup-nginx.sh
 
 install-docker: ## Install Docker Engine + Compose v2 plugin (needs sudo/root)
 	@test "$$(id -u)" = "0" || { echo "This command must be run with sudo: sudo make install-docker"; exit 1; }

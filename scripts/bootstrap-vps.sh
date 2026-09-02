@@ -71,6 +71,11 @@ if [[ -z "${DOMAIN:-}" ]]; then
 fi
 : "${DOMAIN:?DOMAIN is required}"
 
+if [[ -z "${LETSENCRYPT_EMAIL:-}" ]]; then
+  read -r -p "Email for Let's Encrypt expiry notices (blank to use admin@${DOMAIN}): " LETSENCRYPT_EMAIL
+  LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-admin@${DOMAIN}}"
+fi
+
 if [[ -z "${ADMIN_USERNAME:-}" ]]; then
   read -r -p "Username for the first administrator account: " ADMIN_USERNAME
 fi
@@ -117,40 +122,36 @@ if [[ "$MIRRORS" == "1" ]]; then
   NPM_REGISTRY="https://package-mirror.liara.ir/repository/npm/"
 fi
 
-# --------------------------------------------------- port conflict detection
+# --------------------------------------------------------- proxy port
 #
-# The one question that decides everything else: is anything already on
-# 80/443? On a server dedicated to Chatters the answer is no and it can own
-# them directly, exactly like the single-project flow in DEPLOY.md. On a
-# server that already runs another project — the case this script exists to
-# handle well — something else almost certainly already does, most likely
-# that other project's own containerised web server. Two processes cannot
-# both bind the same port, so Chatters has to bind somewhere else and let
-# whatever already owns 80/443 forward to it instead.
-echo "==> Checking whether ports 80/443 are available"
-SHARED_MODE=0
-if port_in_use 80 || port_in_use 443; then
-  SHARED_MODE=1
-  CHAT_PORT="$(find_free_port 8091)"
-  echo "    Port 80 and/or 443 are already in use by something else on this server."
-  echo "    Chatters will bind to 127.0.0.1:${CHAT_PORT} instead (not exposed publicly"
-  echo "    on its own) and you'll add one proxy rule to whatever already owns 80/443."
-  echo "    Full instructions are printed at the end of this run, and are also in"
-  echo "    DEPLOY.md under \"Deploying alongside another project\"."
-else
-  echo "    Both are free — Chatters can bind them directly."
-fi
+# The layout is: host nginx owns 80/443 and routes each subdomain to its
+# project's loopback port. So Chatters never binds a public port itself — it
+# only needs a free loopback one for nginx to proxy to.
+echo "==> Choosing a loopback port for Chatters"
+CHAT_PORT="${CHAT_PORT:-$(find_free_port 8082)}"
+echo "    127.0.0.1:${CHAT_PORT}"
+
+# Whether host nginx can be set up now depends on who holds 80/443. Checked
+# early so the answer is known before anything is built, rather than after.
+PROXY_READY=1
+for p in 80 443; do
+  owner="$(port_owner "$p" || true)"
+  if [[ -n "$owner" && "$owner" != "nginx" ]]; then
+    PROXY_READY=0
+    echo ""
+    echo "    Note: port ${p} is held by \"${owner}\", not nginx."
+    echo "    Chatters will still be deployed, but the reverse proxy and"
+    echo "    certificate step will be skipped — see the instructions printed"
+    echo "    at the end of this run."
+  fi
+done
 
 # ------------------------------------------------------------------- .env
 echo "==> Creating .env file"
 make env
 bash scripts/gen-secrets.sh
 
-if [[ "$SHARED_MODE" == "1" ]]; then
-  sed -i "s|^HTTP_PORT=.*|HTTP_PORT=127.0.0.1:${CHAT_PORT}|" .env
-else
-  sed -i "s|^HTTP_PORT=.*|HTTP_PORT=80|" .env
-fi
+sed -i "s|^HTTP_PORT=.*|HTTP_PORT=127.0.0.1:${CHAT_PORT}|" .env
 
 sed -i "s|^ADMIN_USERNAME=.*|ADMIN_USERNAME=${ADMIN_USERNAME}|" .env
 sed -i "s|^ADMIN_PASSWORD=.*|ADMIN_PASSWORD=${ADMIN_PASSWORD}|" .env
@@ -201,81 +202,48 @@ echo " (also saved in .env — change it once you've signed in)"
 echo "================================================================"
 echo ""
 
-if [[ "$SHARED_MODE" == "0" ]]; then
-  echo "Ports 80/443 were free, so Chatters is already reachable at:"
-  echo "  http://${DOMAIN}"
+# --------------------------------------------------- reverse proxy + SSL
+if [[ "$PROXY_READY" == "1" ]]; then
+  echo "==> Setting up host nginx and the SSL certificate for ${DOMAIN}"
   echo ""
-  echo "For HTTPS, follow DEPLOY.md Part 6 (\"HTTPS\") to install nginx + certbot"
-  echo "on the host and point it at this container. Once that's done:"
-  echo "  https://${DOMAIN}"
-  exit 0
-fi
-
-cat <<EOF
+  DOMAIN="$DOMAIN" \
+  CHAT_PORT="$CHAT_PORT" \
+  LETSENCRYPT_EMAIL="${LETSENCRYPT_EMAIL:-admin@${DOMAIN}}" \
+  STAGING="${STAGING:-0}" \
+    bash scripts/setup-nginx.sh
+else
+  cat <<EOF
 
 ------------------------------------------------------------------------
-Next step: wire chat.example.com-style domain into whatever already owns
-ports 80/443 on this server. Chatters itself is only reachable on this
-machine, at http://127.0.0.1:${CHAT_PORT} — nothing is exposed publicly yet.
+Chatters is running on 127.0.0.1:${CHAT_PORT}, but the reverse proxy step
+was SKIPPED because ports 80/443 are held by something other than nginx.
 
-1) Find that other project's nginx configuration (check its docker-compose
-   file for what's mounted into its web/nginx service) and add a new server
-   block for ${DOMAIN}, proxying everything to Chatters:
+This deployment expects host-level nginx to own 80/443 and route each
+subdomain to its project's loopback port. To finish:
 
-    server {
-        listen 80;
-        server_name ${DOMAIN};
-        location / { return 301 https://\$host\$request_uri; }
-        location /.well-known/acme-challenge/ {
-            root /var/www/certbot;   # match whatever webroot that project's
-                                      # certbot already uses
-        }
-    }
+1) Move whatever currently holds those ports behind host nginx too. If it
+   is another Docker project publishing 80/443 from a container, change
+   its compose file from:
+       ports: ["80:80", "443:443"]
+   to a loopback port, e.g.:
+       ports: ["127.0.0.1:8081:80"]
+   drop its 443 mapping, then: docker compose up -d
 
-    server {
-        listen 443 ssl;
-        server_name ${DOMAIN};
+2) Re-run the proxy setup for Chatters:
+       sudo ./scripts/setup-nginx.sh
 
-        # Path to a certificate for ${DOMAIN} — see step 2 below.
-        ssl_certificate     /etc/letsencrypt/live/${DOMAIN}/fullchain.pem;
-        ssl_certificate_key /etc/letsencrypt/live/${DOMAIN}/privkey.pem;
+3) Give that other project its own server block the same way, pointing at
+   its loopback port, and let the host certbot handle its certificate too.
 
-        location / {
-            proxy_pass http://127.0.0.1:${CHAT_PORT};
-            proxy_http_version 1.1;
-
-            # \$host, not \$http_host stripped of its port: Chatters checks
-            # that a request's Origin matches its Host, so this has to be
-            # exactly what the browser sees, or every request gets rejected.
-            proxy_set_header Host \$host;
-            proxy_set_header X-Real-IP \$remote_addr;
-            proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
-            proxy_set_header X-Forwarded-Proto \$scheme;
-
-            # Required for live messaging (WebSocket).
-            proxy_set_header Upgrade \$http_upgrade;
-            proxy_set_header Connection "upgrade";
-            proxy_read_timeout 86400;
-            proxy_send_timeout 86400;
-        }
-    }
-
-   Reload that project's nginx after adding it (e.g. its own
-   "docker compose exec web nginx -s reload" or equivalent).
-
-2) Get a certificate for ${DOMAIN}. If that other project already runs its
-   own certbot container against a webroot (as in the block above), reuse
-   it — run this FROM THAT OTHER PROJECT'S directory, so it reuses its
-   existing certbot image and its /etc/letsencrypt volume:
-
-    docker compose run --rm --entrypoint \\
-      "certbot certonly --webroot -w /var/www/certbot \\
-        --email admin@${DOMAIN} -d ${DOMAIN} \\
-        --agree-tos --no-eff-email" certbot
-
-   Its regular "certbot renew" (already scheduled for its own domain) will
-   renew this one too from then on — nothing extra to maintain.
-
-Once both are done: https://${DOMAIN}
+If you would instead rather keep that project owning 80/443 and have IT
+proxy to Chatters, that also works - see DEPLOY.md, Appendix C.
 ------------------------------------------------------------------------
 EOF
+fi
+
+echo ""
+echo "================================================================"
+echo " Admin username: ${ADMIN_USERNAME}"
+echo " Admin password: ${ADMIN_PASSWORD}"
+echo " (also in .env - change it once you have signed in)"
+echo "================================================================"

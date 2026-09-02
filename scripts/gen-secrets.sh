@@ -41,18 +41,40 @@ random_secret() {
 echo "Filling secrets in .env"
 set_if_empty JWT_SECRET "$(random_secret)"
 
-# VAPID keys need the Go toolchain; skip rather than fail if it is absent,
-# since push notifications are optional.
-if command -v go >/dev/null 2>&1; then
-  if grep -qE '^VAPID_PUBLIC_KEY=.+$' .env; then
-    echo "  VAPID keys already set, leaving them alone"
-  else
-    vapid_output="$(cd Chatters && go run ./cmd/vapid)"
-    set_if_empty VAPID_PUBLIC_KEY "$(echo "$vapid_output" | grep '^VAPID_PUBLIC_KEY=' | cut -d= -f2-)"
-    set_if_empty VAPID_PRIVATE_KEY "$(echo "$vapid_output" | grep '^VAPID_PRIVATE_KEY=' | cut -d= -f2-)"
+# Web Push (VAPID) keys.
+#
+# Two ways to mint these, because the server usually cannot do it the obvious
+# way: the recommended deployment ships prebuilt images to a machine with no
+# Go toolchain. This used to silently skip key generation there, which left
+# push notifications impossible to enable on exactly the servers the
+# deployment guide steers people towards. So fall back to the backend image,
+# which carries the same generator behind `-vapid`.
+generate_vapid() {
+  if command -v go >/dev/null 2>&1; then
+    (cd Chatters && go run ./cmd/server -vapid) 2>/dev/null && return 0
   fi
+
+  # The image's ENTRYPOINT is already the server binary, so the flag is just
+  # appended — no --entrypoint override needed.
+  if command -v docker >/dev/null 2>&1 \
+     && docker image inspect chatters-backend:latest >/dev/null 2>&1; then
+    docker run --rm chatters-backend:latest -vapid 2>/dev/null && return 0
+  fi
+
+  return 1
+}
+
+if grep -qE '^VAPID_PUBLIC_KEY=.+$' .env; then
+  echo "  VAPID keys already set, leaving them alone"
+elif vapid_output="$(generate_vapid)"; then
+  set_if_empty VAPID_PUBLIC_KEY "$(echo "$vapid_output" | grep '^VAPID_PUBLIC_KEY=' | cut -d= -f2-)"
+  set_if_empty VAPID_PRIVATE_KEY "$(echo "$vapid_output" | grep '^VAPID_PRIVATE_KEY=' | cut -d= -f2-)"
 else
-  echo "  Go not found — skipping VAPID keys (push notifications stay disabled)"
+  echo "  WARNING: could not generate VAPID keys - push notifications will be"
+  echo "           disabled, and cannot be enabled from the app until they are set."
+  echo "           Needs either the Go toolchain, or the backend image present"
+  echo "           (load it first: ./scripts/load-images.sh), then re-run:"
+  echo "               bash scripts/gen-secrets.sh"
 fi
 
 echo

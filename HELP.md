@@ -53,7 +53,7 @@ All settings live in `.env` (see [.env.example](.env.example)).
 | `JWT_SECRET` | **yes** | Signs login tokens. The backend refuses to start in production without it. |
 | `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | yes | Database credentials. |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` / `ADMIN_EMAIL` | recommended | Creates or promotes the first administrator on boot. Idempotent — it never overwrites an existing password. |
-| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | no | Web Push. Without them the app works normally but cannot notify a closed tab. Generate with `make vapid`. |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT` | no | Web Push. Without them the app works normally but cannot notify a closed tab. `make secrets` generates them automatically — including on a server with no Go toolchain, by running `-vapid` inside the built backend image instead (`make vapid` on its own does the same thing). |
 | `ALLOWED_ORIGINS` | no | Extra browser origins allowed to call the API. Same-origin is always allowed, so this is only needed when the SPA and API are on different hostnames. |
 | `TRUSTED_PROXIES` | no | CIDRs whose `X-Forwarded-For` is believed. Defaults to the private ranges, which covers the bundled nginx. |
 | `MAX_UPLOAD_BYTES` | no | Upload cap, default 20 MiB. Keep in step with `client_max_body_size` in [frontend/app-locations.conf](frontend/app-locations.conf). |
@@ -108,7 +108,7 @@ git clone https://github.com/abolfazlkeshavarz/Chatters.git /opt/chatters && cd 
 ./scripts/bootstrap-vps.sh
 ```
 
-That installs Docker if needed, creates `.env` with generated secrets, and deploys. **Already running another Docker project on this server?** Same command — it detects if ports 80/443 are taken and adapts automatically (binds Chatters to a localhost-only port instead, and prints exactly what to add to whichever server already owns 80/443). See DEPLOY.md's [Appendix C](DEPLOY.md#appendix-c--deploying-alongside-another-project). Run `make check-ports` any time to check that on its own.
+That installs Docker if needed, creates `.env` with generated secrets, deploys, and sets up host nginx + a Let's Encrypt certificate for the subdomain you give it (`sudo ./scripts/setup-nginx.sh` on its own does just that last part). **Already running another Docker project on this server?** Same command — every project sits behind that one host nginx, each on its own subdomain and its own loopback port, so if another project currently publishes 80/443 itself it gets walked through moving behind the shared proxy too. See DEPLOY.md's [Appendix C](DEPLOY.md#appendix-c--deploying-alongside-other-projects). Run `make check-ports` any time to check who currently holds 80/443.
 
 **Server too small to build on?** The frontend build wants ~1.5 GB of RAM, which a 1-core VPS may not survive. Build on your own machine instead and copy the images across — `make build-images`, `scp`, then `./scripts/load-images.sh && make up-prebuilt` on the server. `bootstrap-vps.sh` detects prebuilt images and skips building. See DEPLOY.md's [Appendix A](DEPLOY.md#appendix-a--low-memory-servers-and-building-elsewhere).
 

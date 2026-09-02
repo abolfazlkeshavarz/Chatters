@@ -78,3 +78,30 @@ find_free_port() {
   done
   echo "$port"
 }
+
+# ---------------------------------------------------------------------------
+# port_owner <port>
+#
+# Name of the process listening on a host port ("nginx", "docker-proxy", ...),
+# or empty if nothing is. Distinct from port_in_use because on a shared server
+# "something already has 443" is not one situation but two, needing opposite
+# responses:
+#
+#   nginx        - good, that is the reverse proxy we want; just add a site
+#   docker-proxy - a container published it, so host nginx cannot bind it at
+#                  all, and that has to be resolved before going further
+#
+# Needs root to see process names for sockets owned by other users; without it
+# ss prints the socket but no process, so this returns empty and callers fall
+# back to treating it as "unknown owner" rather than guessing wrong.
+# ---------------------------------------------------------------------------
+port_owner() {
+  local port="$1"
+  command -v ss >/dev/null 2>&1 || return 0
+
+  # users:(("nginx",pid=123,fd=6))  ->  nginx
+  ss -Htlnp "( sport = :$port )" 2>/dev/null \
+    | grep -oE 'users:\(\("[^"]+"' \
+    | head -1 \
+    | sed -E 's/.*"([^"]+)"/\1/'
+}

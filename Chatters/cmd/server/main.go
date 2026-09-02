@@ -17,6 +17,8 @@ import (
 	"messenger/internal/websocket"
 
 	"github.com/gin-gonic/gin"
+
+	webpush "github.com/SherClockHolmes/webpush-go"
 )
 
 // healthcheck lets the container probe itself without shipping curl or wget in
@@ -40,11 +42,35 @@ func healthcheck() {
 	os.Exit(0)
 }
 
+// printVAPIDKeys generates a Web Push key pair and exits.
+//
+// Duplicated from cmd/vapid so it is reachable from the shipped image. That
+// matters because the recommended deployment builds images on a development
+// machine and copies them to the server, which therefore has no Go toolchain
+// — and without a way to mint these keys there, push notifications could
+// never be turned on at all:
+//
+//	docker run --rm chatters-backend:latest -vapid
+func printVAPIDKeys() {
+	private, public, err := webpush.GenerateVAPIDKeys()
+	if err != nil {
+		log.Fatalf("failed to generate VAPID keys: %v", err)
+	}
+
+	fmt.Printf("VAPID_PUBLIC_KEY=%s\n", public)
+	fmt.Printf("VAPID_PRIVATE_KEY=%s\n", private)
+	os.Exit(0)
+}
+
 func main() {
 	probe := flag.Bool("healthcheck", false, "probe the running server and exit")
+	vapid := flag.Bool("vapid", false, "print a fresh Web Push VAPID key pair and exit")
 	flag.Parse()
 	if *probe {
 		healthcheck()
+	}
+	if *vapid {
+		printVAPIDKeys()
 	}
 
 	config.Load()

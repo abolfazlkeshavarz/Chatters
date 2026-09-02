@@ -30,7 +30,7 @@ That must print your server's IP. If it prints nothing, wait and try again — c
 
 > **Why HTTPS is not optional here.** End-to-end encryption uses the Web Crypto API and notifications use service workers. Browsers expose neither outside a secure context. Over plain HTTP, Chatters runs but secure chat and notifications are permanently unavailable.
 
-> **Already running another Docker project on this server?** Ports 80/443 can only belong to one thing at a time, so the walkthrough below — which has Chatters own them directly — does not apply as-is. Skip to [Appendix C](#appendix-c--deploying-alongside-another-project) instead; `make bootstrap` there detects the conflict automatically and adapts.
+> **Already running another Docker project on this server?** This walkthrough already assumes host nginx as the shared entry point, which is exactly what makes that work — but if that other project currently publishes 80/443 itself, it needs to move behind the same proxy first. See [Appendix C](#appendix-c--deploying-alongside-other-projects); `./scripts/bootstrap-vps.sh` detects this automatically and walks through it.
 
 ---
 
@@ -199,7 +199,7 @@ ADMIN_EMAIL=you@YOUR_DOMAIN
 And change the port line so the container is **only** reachable from the host:
 
 ```ini
-HTTP_PORT=127.0.0.1:8080
+HTTP_PORT=127.0.0.1:8082
 ```
 
 That is the Docker-bypasses-UFW protection from Part 1. The host's nginx will be the only thing talking to it.
@@ -255,7 +255,7 @@ chatters-frontend-1   Up 28 seconds
 Confirm the app answers locally:
 
 ```bash
-curl http://127.0.0.1:8080/healthz
+curl http://127.0.0.1:8082/healthz
 ```
 
 Expected: `{"status":"ok"}`
@@ -274,87 +274,25 @@ You should see `bootstrap: created administrator "YOUR_ADMIN_NAME"` and `listeni
 
 ## Part 6 — HTTPS
 
-The host's nginx terminates TLS and forwards to the container.
+The design: host-level nginx owns ports 80/443 and is the *only* thing that does. It terminates TLS and reverse-proxies to the Chatters container over loopback. This is what makes running several projects on one server straightforward — each just gets its own subdomain and its own loopback port; see [Appendix C](#appendix-c--deploying-alongside-other-projects) once you have more than one.
 
 ```bash
-sudo apt install -y nginx certbot python3-certbot-nginx
+sudo ./scripts/setup-nginx.sh
 ```
 
-Create the site config:
+It installs nginx and certbot if needed, asks for the subdomain and a contact email, and then:
+
+1. Writes an HTTP-only site so certbot's webroot challenge has something to answer.
+2. Requests the certificate.
+3. Rewrites the site for HTTPS, pointed at the loopback port from `HTTP_PORT` in `.env`.
+4. Registers a `--deploy-hook` so certbot's own renewal (already scheduled by the package) reloads nginx automatically when the certificate renews.
+
+Every reload is preceded by `nginx -t`; if the generated config fails that check it is removed again before reloading, rather than risking every other site on the box over one bad config.
+
+Non-interactive:
 
 ```bash
-sudo nano /etc/nginx/sites-available/chatters
-```
-
-Paste this, replacing `YOUR_DOMAIN`:
-
-```nginx
-server {
-    listen 80;
-    server_name YOUR_DOMAIN www.YOUR_DOMAIN;
-
-    # Must match MAX_UPLOAD_BYTES in .env (20 MiB by default). If this is
-    # smaller, uploads fail at the outer proxy before reaching the app.
-    client_max_body_size 20M;
-
-    location / {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_http_version 1.1;
-
-        # $http_host, NOT $host. $host strips the port, which breaks the
-        # backend's same-origin check and makes every request fail with
-        # "origin not allowed".
-        proxy_set_header Host              $http_host;
-        proxy_set_header X-Real-IP         $remote_addr;
-        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        # Required for live messaging. Without these the WebSocket handshake
-        # fails and the app falls back to never receiving anything in real time.
-        proxy_set_header Upgrade    $http_upgrade;
-        proxy_set_header Connection "upgrade";
-
-        # Chat sockets are long-lived; the 60s default would cut them hourly.
-        proxy_read_timeout 86400;
-        proxy_send_timeout 86400;
-    }
-}
-```
-
-Enable it and drop nginx's default placeholder site:
-
-```bash
-sudo ln -sf /etc/nginx/sites-available/chatters /etc/nginx/sites-enabled/chatters && sudo rm -f /etc/nginx/sites-enabled/default
-```
-
-Check the syntax before reloading:
-
-```bash
-sudo nginx -t
-```
-
-```bash
-sudo systemctl reload nginx
-```
-
-Now request the certificate. Certbot edits the config above to add TLS and a redirect from port 80:
-
-```bash
-sudo certbot --nginx -d YOUR_DOMAIN -d www.YOUR_DOMAIN
-```
-
-Choose **redirect** when asked whether to force HTTPS.
-
-Verify auto-renewal is armed:
-
-```bash
-sudo systemctl status certbot.timer
-```
-
-Test the renewal path without actually renewing:
-
-```bash
-sudo certbot renew --dry-run
+DOMAIN=YOUR_DOMAIN LETSENCRYPT_EMAIL=you@example.com sudo -E ./scripts/setup-nginx.sh
 ```
 
 ### Confirm it works
@@ -366,6 +304,12 @@ curl -s https://YOUR_DOMAIN/healthz
 Expected: `{"status":"ok"}`
 
 Then open **https://YOUR_DOMAIN** in a browser. You should get the Chatters sign-in screen with a padlock in the address bar.
+
+Want to see what it's going to write before running it for real?
+
+```bash
+make nginx-config
+```
 
 ---
 
@@ -689,7 +633,7 @@ Work through this once the site is live.
 
 - [ ] SSH password authentication disabled, key login confirmed working
 - [ ] `ufw status` shows only 22, 80 and 443
-- [ ] `HTTP_PORT=127.0.0.1:8080` in `.env` — the container is not published to `0.0.0.0`
+- [ ] `HTTP_PORT=127.0.0.1:8082` in `.env` — the container is not published to `0.0.0.0`
 - [ ] `chmod 600 .env`
 - [ ] `JWT_SECRET` is 32+ random characters, not the placeholder
 - [ ] `POSTGRES_PASSWORD` changed from `change_me`
@@ -702,7 +646,7 @@ Work through this once the site is live.
 Verify the container is genuinely not exposed — from your **local** machine, not the server:
 
 ```bash
-curl --max-time 5 http://YOUR_SERVER_IP:8080/healthz
+curl --max-time 5 http://YOUR_SERVER_IP:8082/healthz
 ```
 
 This must **fail** (timeout or connection refused). If it returns `{"status":"ok"}`, the container is published to the internet and bypassing your firewall: fix `HTTP_PORT` in `.env` and run `make up`.
@@ -715,99 +659,47 @@ sudo apt update && sudo apt upgrade -y
 
 ---
 
-## Appendix C — Deploying alongside another project
+## Appendix C — Deploying alongside other projects
 
-For a server that already runs a different project in Docker — its own `docker-compose.yml`, its own containers, quite possibly its own dockerized nginx already sitting on ports 80/443.
+The design for this: **one host-level nginx owns ports 80/443 and is the only thing that ever does.** Every project — Chatters, and anything else on the box — runs in Docker bound to a loopback port and gets its own subdomain and its own nginx server block. Nothing but that one nginx is reachable from the internet.
 
-**The one thing that actually matters here is ports.** Everything else Compose does — container names, networks, volumes — is already namespaced by project name, so a second, differently-named project on the same Docker daemon cannot collide with the first one by accident. Ports are the exception: they are a single shared, host-wide resource, and two processes — containerized or not, related or not — cannot both bind :80.
+This is what Part 6 already sets up for Chatters alone. Adding a second project is the same shape again: give it a loopback port, give it a subdomain, give it a server block.
 
-### The automated path
+### Adding Chatters to a server that already has another project
 
-```bash
-git clone https://github.com/abolfazlkeshavarz/Chatters.git /opt/chatters
-```
+If ports 80/443 are already free — nothing on the box yet, or the other project is *already* behind a host nginx of its own — just follow the [main walkthrough](#part-4--configure) normally; `HTTP_PORT=127.0.0.1:8082` in `.env` and `sudo ./scripts/setup-nginx.sh` add Chatters as one more site.
 
-```bash
-cd /opt/chatters
-```
+If something else currently publishes 80/443 directly — most often another project's own containerized web server, `ports: ["80:80", "443:443"]` in its `docker-compose.yml` — that has to move behind the shared proxy too, since only one process can hold those ports:
 
 ```bash
-./scripts/bootstrap-vps.sh
+sudo ./scripts/bootstrap-vps.sh
 ```
 
-It installs Docker if it is not already there (harmless to run even when it is — Docker itself happily hosts any number of independent compose projects side by side), asks for your domain and an admin username, then checks `ports 80 and 443`:
+It detects this automatically (checks *who* holds 80/443, not just whether they're free) and prints the exact steps, which come down to:
 
-- **Free** — Chatters binds them directly, same as the [main walkthrough](#part-6--https). This is the case where nothing else is on the box yet.
-- **Already in use** — the actual point of this appendix. It picks the first free port from 8091 up, binds Chatters to `127.0.0.1:THAT_PORT` (never `0.0.0.0` — never reachable from the internet directly), deploys, and **prints the exact nginx server block and certbot command** to wire your domain into whatever already owns 80/443. It does not edit that other project's files itself — you paste in what it prints.
+1. **In the other project's `docker-compose.yml`**, change its web service from publishing 80/443 to a loopback port instead:
 
-You can run the same port check on its own at any time:
+   ```diff
+   -  ports:
+   -    - "80:80"
+   -    - "443:443"
+   +  ports:
+   +    - "127.0.0.1:8081:80"
+   ```
 
-```bash
-make check-ports
-```
+   Recreate it: `docker compose up -d` (from that project's directory).
 
-### What "wire it in" means, concretely
+2. **Give it its own nginx site**, the same shape Chatters gets — `sudo ./scripts/setup-nginx.sh` writes this pattern; for a project that isn't Chatters, copy the site file it produces (`/etc/nginx/sites-available/chatters`) as a template and point `proxy_pass` at that project's loopback port instead.
 
-Say Chatters ends up on `127.0.0.1:8091` and your domain is `chat.example.com`. Two things need to happen on whatever already owns 80/443 — most often that other project's own containerized nginx, matching the `web` + `certbot` pattern several Docker project templates use:
+3. **Move its certificate under the shared nginx**, or issue a fresh one for it the same way `setup-nginx.sh` does — one certbot install serves any number of domains; each is independent.
 
-**1. A new server block**, proxying the whole domain to Chatters:
+4. Run `sudo ./scripts/setup-nginx.sh` for Chatters itself.
 
-```nginx
-server {
-    listen 443 ssl;
-    server_name chat.example.com;
+Every project ends up structurally identical: its own container(s), its own loopback port, its own nginx site, its own certificate. None of them are reachable except through the one host nginx.
 
-    ssl_certificate     /etc/letsencrypt/live/chat.example.com/fullchain.pem;
-    ssl_certificate_key /etc/letsencrypt/live/chat.example.com/privkey.pem;
+### Why not let each project run its own containerized nginx on 80/443?
 
-    location / {
-        proxy_pass http://127.0.0.1:8091;
-        proxy_http_version 1.1;
-
-        # $host, not a variant that strips the port: Chatters checks that a
-        # request's Origin matches its Host, so this has to be exactly what
-        # the browser sees or every request is rejected as cross-origin.
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-
-        # Required for live messaging (WebSocket).
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        proxy_read_timeout 86400;
-        proxy_send_timeout 86400;
-    }
-}
-```
-
-Chatters does its own internal routing (API, WebSocket, static files) behind this single block — the other project's nginx only needs to be a plain pipe to `127.0.0.1:8091`, not reimplement any of that.
-
-Where exactly this block goes depends on how that project structures its nginx config — check its `docker-compose.yml` for what's mounted into its web/nginx service. `bootstrap-vps.sh` prints this same block with your actual domain and port already filled in, plus the matching plain-HTTP block that redirects to it and answers the ACME challenge.
-
-**2. A certificate for the new domain.** If that other project already runs its own certbot container against a webroot (as the block above assumes), the cheapest way to get one is to reuse it — run this **from that other project's own directory**, so it reuses its existing certbot image and its `/etc/letsencrypt` volume:
-
-```bash
-docker compose run --rm --entrypoint "certbot certonly --webroot -w /var/www/certbot --email you@example.com -d chat.example.com --agree-tos --no-eff-email" certbot
-```
-
-(Adjust the webroot path if that project uses a different one — check its nginx config for the `location /.well-known/acme-challenge/` block.) Its regular `certbot renew` — already scheduled for its own domain — renews this one too from then on: `certbot renew` renews everything it finds under `/etc/letsencrypt/live/`, not just the domain it was first set up for. Nothing extra to maintain.
-
-If that other project does *not* already have its own certbot, or you would rather keep the two fully independent, get the certificate with a one-off standalone certbot run instead — this only needs port 80 free for a few seconds, which is fine even while the other project's nginx is up, since certbot can share the challenge briefly via the webroot method as long as the new domain's plain-HTTP server block (part 1, above) is already in place to serve it:
-
-```bash
-sudo apt install -y certbot
-```
-
-```bash
-sudo certbot certonly --webroot -w /var/www/YOUR_WEBROOT -d chat.example.com
-```
-
-Point that path at wherever the plain-HTTP block above serves `/.well-known/acme-challenge/` from, and set up its own renewal (`sudo certbot renew --dry-run` to test, then a cron/systemd timer — `apt install certbot` usually adds one automatically).
-
-### Why not just run Chatters' own nginx on 80/443 instead?
-
-Because something already is. This is not a Chatters limitation — it is true of *any* two independent web-facing Docker projects on one server: exactly one process gets to hold each of those ports, full stop. The pattern above (one edge proxy per port, everything else on `127.0.0.1:*`) is the standard way around that, and it is also exactly what the [main walkthrough](#part-6--https) already does for the single-project case — there, Chatters' own container is the thing on `127.0.0.1:8080` and a host-installed nginx is the edge. Sharing a server just means a *pre-existing* edge does that job instead of a fresh one, for both projects at once.
+Because only one can. That is a hard OS-level constraint, not a Chatters opinion — two processes cannot bind the same port regardless of whether either is containerized. The host-owns-80/443 pattern above is the standard way around it: exactly one thing terminates TLS and does the port binding, and every application, containerized or not, sits behind it on a port nothing outside the machine can reach.
 
 ---
 
@@ -817,22 +709,28 @@ Because something already is. This is not a Chatters limitation — it is true o
 Internet
    │  443 (TLS, Let's Encrypt)
    ▼
-host nginx ──────────────► 127.0.0.1:8080
-                                │
-                    ┌───────────┴────────────┐
-                    │  frontend container    │  nginx: serves the React build,
-                    │                        │  proxies /api, /login, /register
-                    └───────────┬────────────┘
+host nginx ──────────────► 127.0.0.1:8082
+   │  (one more site block per project, if you host others too)
+   ▼
+                    ┌───────────────────────┐
+                    │  frontend container   │  nginx: serves the React build,
+                    │                       │  proxies /api, /login, /register
+                    └───────────┬───────────┘
                                 │ (docker network, not published)
-                    ┌───────────┴────────────┐
-                    │  backend container     │  Go: REST + WebSocket
-                    └───────────┬────────────┘
-                                │
-                    ┌───────────┴────────────┐
-                    │  db container          │  PostgreSQL
-                    └────────────────────────┘
+                ┌───────────────┼───────────────┐
+                ▼                               ▼
+    ┌───────────────────┐           ┌───────────────────┐
+    │  backend container │  ───────▶│  redis container   │  shared state, so
+    │  Go: REST+WebSocket │           │  (optional; falls  │  the design also
+    └──────────┬─────────┘           │  back to in-process │  scales past one
+               │                     │  if absent)         │  backend replica
+               ▼                     └────────────────────┘
+    ┌───────────────────┐
+    │  db container      │  PostgreSQL
+    └────────────────────┘
 
 Volumes: chatters_db_data (database), chatters_uploads (attachments)
 ```
 
-Only the host's nginx is exposed. The application, the database and the uploads are all reachable only from inside the Docker network.
+Only the host's nginx is exposed. The application, the database, redis and the uploads are all reachable only from inside the Docker network.
+
