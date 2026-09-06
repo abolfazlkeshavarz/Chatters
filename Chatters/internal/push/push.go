@@ -2,8 +2,10 @@ package push
 
 import (
 	"encoding/json"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"sync"
 
 	"messenger/internal/config"
@@ -11,6 +13,18 @@ import (
 
 	webpush "github.com/SherClockHolmes/webpush-go"
 )
+
+// endpointHost returns just the scheme+host of a push endpoint for logging.
+// The full endpoint embeds a per-subscription token that should not land in
+// logs; the host alone ("https://web.push.apple.com") is enough to tell which
+// push service rejected a send.
+func endpointHost(endpoint string) string {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Host == "" {
+		return "unknown"
+	}
+	return u.Scheme + "://" + u.Host
+}
 
 // Notification is the payload the service worker receives. For end-to-end
 // encrypted chats the body is intentionally a fixed placeholder: the server
@@ -85,6 +99,7 @@ func SendToUser(userID string, n Notification) {
 				Urgency:         webpush.UrgencyHigh,
 			})
 			if err != nil {
+				log.Printf("push: send to %s failed: %v", endpointHost(s.endpoint), err)
 				return
 			}
 			defer resp.Body.Close()
@@ -93,6 +108,17 @@ func SendToUser(userID string, n Notification) {
 			// uninstalled the PWA.
 			if resp.StatusCode == http.StatusGone || resp.StatusCode == http.StatusNotFound {
 				_, _ = db.DB.Exec(`DELETE FROM push_subscriptions WHERE endpoint = $1`, s.endpoint)
+				return
+			}
+
+			// Any other non-2xx is a delivery failure the caller never sees
+			// otherwise. Apple's gateway in particular rejects the whole
+			// request (400/403) for a malformed VAPID subject or a public key
+			// that does not match the signing key — log the body so the reason
+			// is visible.
+			if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+				body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
+				log.Printf("push: %s returned %d: %s", endpointHost(s.endpoint), resp.StatusCode, body)
 			}
 		}(s)
 	}
