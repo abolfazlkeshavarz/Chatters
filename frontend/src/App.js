@@ -7,11 +7,12 @@ import { onSessionExpired } from "./api/client";
 import { chatSocket } from "./services/websocket";
 
 /**
- * Self-service signup is off, matching the "ظرفیت ها پر شد" notice the login
- * screen used to show. Administrators create accounts from the admin panel.
- * Flip this to true to reopen public registration.
+ * Public signup is open, but it does not create an account: the form files a
+ * request that an administrator approves or rejects from the panel. Nobody
+ * gets in without a decision, so this being true is not the same as the
+ * unmoderated signup it used to mean.
  */
-const REGISTRATION_OPEN = false;
+const REGISTRATION_OPEN = true;
 
 export default function App() {
   const [loggedIn, setLoggedIn] = useState(isLoggedIn);

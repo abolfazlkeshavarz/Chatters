@@ -57,8 +57,13 @@ func UploadMedia(c *gin.Context) {
 		return
 	}
 
-	// Reject oversized bodies before buffering them to disk.
-	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, config.C.MaxUploadBytes)
+	// Reject oversized bodies before buffering them to disk. Administrators are
+	// exempt: the cap exists to stop ordinary users filling the server's disk,
+	// and the operator is the one person entitled to decide otherwise.
+	limit := uploadLimitFor(c)
+	if limit > 0 {
+		c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, limit)
+	}
 
 	file, err := c.FormFile("file")
 	if err != nil {
@@ -75,7 +80,7 @@ func UploadMedia(c *gin.Context) {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "file required"})
 		return
 	}
-	if file.Size > config.C.MaxUploadBytes {
+	if limit > 0 && file.Size > limit {
 		c.JSON(http.StatusRequestEntityTooLarge, gin.H{"error": "file is too large"})
 		return
 	}

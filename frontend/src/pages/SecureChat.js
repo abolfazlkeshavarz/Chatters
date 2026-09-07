@@ -109,7 +109,7 @@ export default function SecureChat({ chatId, title, chat, onBack, onChatPatch, o
         );
       }
     } catch (err) {
-      setSetupError(err.message || "Could not prepare secure chat");
+      setSetupError(err.message || "آماده‌سازی گفتگوی محرمانه ناموفق بود");
     } finally {
       setReady(true);
     }
@@ -143,7 +143,7 @@ export default function SecureChat({ chatId, title, chat, onBack, onChatPatch, o
     try {
       await deleteMessage(message.id, scope);
     } catch (err) {
-      setError(err.message || "Could not delete the message");
+      setError(err.message || "حذف پیام ناموفق بود");
     }
   }
 
@@ -156,7 +156,7 @@ export default function SecureChat({ chatId, title, chat, onBack, onChatPatch, o
       onChatPatch?.({ self_destruct_seconds: seconds });
     } catch (err) {
       setSelfDestructSeconds(prev);
-      setError(err.message || "Could not change the timer");
+      setError(err.message || "تغییر زمان‌سنج ناموفق بود");
     }
   }
 
@@ -167,7 +167,7 @@ export default function SecureChat({ chatId, title, chat, onBack, onChatPatch, o
       onChatPatch?.({ e2e_status: "accepted", e2e_enabled: true });
       onSecured?.();
     } catch (err) {
-      setError(err.message || "Could not accept");
+      setError(err.message || "پذیرش ناموفق بود");
     } finally {
       setBusy(false);
     }
@@ -179,7 +179,7 @@ export default function SecureChat({ chatId, title, chat, onBack, onChatPatch, o
       await rejectE2E(chatId);
       onBack?.();
     } catch (err) {
-      setError(err.message || "Could not reject");
+      setError(err.message || "رد کردن ناموفق بود");
       setBusy(false);
     }
   }
@@ -191,7 +191,7 @@ export default function SecureChat({ chatId, title, chat, onBack, onChatPatch, o
       <div className="pane">
         <div className="app-header" style={styles.header}>
           {onBack && (
-            <button onClick={onBack} style={styles.back} aria-label="Back">
+            <button onClick={onBack} style={styles.back} aria-label="بازگشت">
               ←
             </button>
           )}
@@ -201,7 +201,7 @@ export default function SecureChat({ chatId, title, chat, onBack, onChatPatch, o
               <span aria-hidden="true">🔒 </span>
               {title}
             </div>
-            <div style={styles.subtitle}>Secret chat · pending</div>
+            <div style={styles.subtitle}>گفتگوی محرمانه · در انتظار</div>
           </div>
         </div>
 
@@ -247,7 +247,7 @@ export default function SecureChat({ chatId, title, chat, onBack, onChatPatch, o
     <div className="pane">
       <div className="app-header" style={styles.header}>
         {onBack && (
-          <button onClick={onBack} style={styles.back} aria-label="Back">
+          <button onClick={onBack} style={styles.back} aria-label="بازگشت">
             ←
           </button>
         )}
@@ -268,7 +268,7 @@ export default function SecureChat({ chatId, title, chat, onBack, onChatPatch, o
         {chat?.is_secret && (
           <button
             onClick={() => setShowTimer(true)}
-            title="Self-destruct timer"
+            title="زمان‌سنج خودتخریبی"
             style={styles.muteBtn}
           >
             ⏱
@@ -285,7 +285,7 @@ export default function SecureChat({ chatId, title, chat, onBack, onChatPatch, o
               onChatPatch?.({ muted: !next });
             }
           }}
-          title={chat?.muted ? "Unmute notifications" : "Mute notifications"}
+          title={chat?.muted ? "فعال کردن اعلان‌ها" : "بی‌صدا کردن اعلان‌ها"}
           style={styles.muteBtn}
         >
           {chat?.muted ? "🔕" : "🔔"}
@@ -307,7 +307,7 @@ export default function SecureChat({ chatId, title, chat, onBack, onChatPatch, o
         <div className="modal-overlay" onClick={() => setShowTimer(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div style={styles.modalBody}>
-              <h3 style={{ marginTop: 0 }}>Self-destruct timer</h3>
+              <h3 style={{ marginTop: 0 }}>زمان‌سنج خودتخریبی</h3>
               <p className="muted">
                 New messages in this chat are deleted this long after they are
                 sent, on every device. Applies to messages sent from now on.
@@ -334,7 +334,7 @@ export default function SecureChat({ chatId, title, chat, onBack, onChatPatch, o
         <div className="modal-overlay" onClick={() => setShowVerify(false)}>
           <div className="modal" onClick={(e) => e.stopPropagation()}>
             <div style={styles.modalBody}>
-              <h3 style={{ marginTop: 0 }}>Safety number</h3>
+              <h3 style={{ marginTop: 0 }}>شماره امنیتی</h3>
               <p className="muted">
                 Compare this number with the other person over a channel you
                 already trust — in person, or a phone call. If it matches on
@@ -388,7 +388,7 @@ export default function SecureChat({ chatId, title, chat, onBack, onChatPatch, o
         onCancelReply={() => setReplyTo(null)}
         disabled={blocked}
         allowAttachments={false}
-        placeholder={blocked ? "Secure chat unavailable" : "پیام رمزنگاری‌شده"}
+        placeholder={blocked ? "گفتگوی محرمانه در دسترس نیست" : "پیام رمزنگاری‌شده"}
       />
     </div>
   );

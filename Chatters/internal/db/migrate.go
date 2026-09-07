@@ -217,6 +217,162 @@ var migrations = []string{
 	// 'system' messages carry a server-rendered notice (timer changed, …) with
 	// no sender. The column had no CHECK constraint, so this is just documenting
 	// the new value.
+
+	// --- Phone numbers ---
+	// Stored in a normalised form (digits, optional leading +) so a lookup by
+	// phone is an equality test rather than a fuzzy match. UNIQUE because it is
+	// an identifier people are found by, exactly like the email.
+	//
+	// phone_verified gates whether the number is usable for discovery: a number
+	// a user typed themselves is unverified until an administrator approves the
+	// pending request, so nobody can claim someone else's number and be found
+	// as them.
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone TEXT`,
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN NOT NULL DEFAULT false`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_users_phone ON users(phone) WHERE phone IS NOT NULL`,
+
+	// A user asking to set or change their number. Exactly one row per user may
+	// be pending at a time (partial unique index), so a spammed form cannot
+	// bury the admin queue.
+	`CREATE TABLE IF NOT EXISTS phone_requests (
+		id           SERIAL PRIMARY KEY,
+		user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+		phone        TEXT NOT NULL,
+		status       TEXT NOT NULL DEFAULT 'pending',
+		note         TEXT,
+		created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+		decided_at   TIMESTAMPTZ,
+		decided_by   TEXT REFERENCES users(id) ON DELETE SET NULL ON UPDATE CASCADE
+	)`,
+	`ALTER TABLE phone_requests DROP CONSTRAINT IF EXISTS phone_requests_status_check`,
+	`ALTER TABLE phone_requests ADD CONSTRAINT phone_requests_status_check
+		CHECK (status IN ('pending','approved','rejected'))`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_phone_requests_one_pending
+		ON phone_requests(user_id) WHERE status = 'pending'`,
+	`CREATE INDEX IF NOT EXISTS idx_phone_requests_status ON phone_requests(status, created_at)`,
+
+	// --- Registration requests (signup needs admin approval) ---
+	// Signing up no longer creates a user. It records the request — password
+	// already hashed, key bundle already wrapped client-side — and an
+	// administrator turns it into an account. The bundle is carried through
+	// verbatim so the approved account keeps the key pair the browser generated
+	// at signup, and the user's existing password still unwraps it.
+	`CREATE TABLE IF NOT EXISTS registration_requests (
+		id                    SERIAL PRIMARY KEY,
+		username              TEXT NOT NULL,
+		email                 TEXT NOT NULL,
+		phone                 TEXT,
+		password_hash         TEXT NOT NULL,
+		public_key            TEXT,
+		encrypted_private_key TEXT,
+		key_salt              TEXT,
+		key_nonce             TEXT,
+		status                TEXT NOT NULL DEFAULT 'pending',
+		reason                TEXT,
+		created_at            TIMESTAMPTZ NOT NULL DEFAULT now(),
+		decided_at            TIMESTAMPTZ,
+		decided_by            TEXT REFERENCES users(id) ON DELETE SET NULL ON UPDATE CASCADE
+	)`,
+	`ALTER TABLE registration_requests DROP CONSTRAINT IF EXISTS registration_requests_status_check`,
+	`ALTER TABLE registration_requests ADD CONSTRAINT registration_requests_status_check
+		CHECK (status IN ('pending','approved','rejected'))`,
+	// One live request per desired username / email, so the queue cannot be
+	// flooded with duplicates of the same signup.
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_regreq_pending_username
+		ON registration_requests(lower(username)) WHERE status = 'pending'`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_regreq_pending_email
+		ON registration_requests(lower(email)) WHERE status = 'pending'`,
+	`CREATE INDEX IF NOT EXISTS idx_regreq_status ON registration_requests(status, created_at DESC)`,
+
+	// --- Public file / media library ---
+	// A shared board any signed-in user can post to, separate from chats.
+	// visibility 'public' is readable by every signed-in user; 'private'
+	// requires the password the uploader set (bcrypt-hashed, never returned).
+	// Administrators bypass the password — the panel can open anything.
+	`CREATE TABLE IF NOT EXISTS public_files (
+		id            SERIAL PRIMARY KEY,
+		owner_id      TEXT REFERENCES users(id) ON DELETE SET NULL ON UPDATE CASCADE,
+		title         TEXT NOT NULL DEFAULT '',
+		description   TEXT NOT NULL DEFAULT '',
+		filename      TEXT NOT NULL,
+		file_path     TEXT NOT NULL,
+		mime_type     TEXT NOT NULL DEFAULT 'application/octet-stream',
+		size_bytes    BIGINT NOT NULL DEFAULT 0,
+		visibility    TEXT NOT NULL DEFAULT 'public',
+		password_hash TEXT,
+		download_count INTEGER NOT NULL DEFAULT 0,
+		created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`,
+	`ALTER TABLE public_files DROP CONSTRAINT IF EXISTS public_files_visibility_check`,
+	`ALTER TABLE public_files ADD CONSTRAINT public_files_visibility_check
+		CHECK (visibility IN ('public','private'))`,
+	// A private row without a password would be unopenable by anyone but an
+	// admin, which is never what the uploader meant.
+	`ALTER TABLE public_files DROP CONSTRAINT IF EXISTS public_files_private_needs_password`,
+	`ALTER TABLE public_files ADD CONSTRAINT public_files_private_needs_password
+		CHECK (visibility <> 'private' OR password_hash IS NOT NULL)`,
+	`CREATE INDEX IF NOT EXISTS idx_public_files_created ON public_files(created_at DESC)`,
+	`CREATE INDEX IF NOT EXISTS idx_public_files_owner ON public_files(owner_id)`,
+
+	// --- Admin announcements ---
+	// A dismissible notice pinned above the chat list — not a chat message.
+	// author_label is what the admin wants signed on it ("Support", a real
+	// name, …) rather than their raw username; color/accent let the panel
+	// style it.
+	`CREATE TABLE IF NOT EXISTS announcements (
+		id           SERIAL PRIMARY KEY,
+		created_by   TEXT REFERENCES users(id) ON DELETE SET NULL ON UPDATE CASCADE,
+		author_label TEXT NOT NULL DEFAULT '',
+		title        TEXT NOT NULL DEFAULT '',
+		body         TEXT NOT NULL,
+		color        TEXT NOT NULL DEFAULT '#2f6fed',
+		text_color   TEXT NOT NULL DEFAULT '#ffffff',
+		icon         TEXT NOT NULL DEFAULT '📢',
+		priority     TEXT NOT NULL DEFAULT 'normal',
+		dismissible  BOOLEAN NOT NULL DEFAULT true,
+		active       BOOLEAN NOT NULL DEFAULT true,
+		everyone     BOOLEAN NOT NULL DEFAULT true,
+		starts_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+		expires_at   TIMESTAMPTZ,
+		created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`,
+	`ALTER TABLE announcements DROP CONSTRAINT IF EXISTS announcements_priority_check`,
+	`ALTER TABLE announcements ADD CONSTRAINT announcements_priority_check
+		CHECK (priority IN ('low','normal','high','critical'))`,
+
+	// Empty for an "everyone" announcement; otherwise the explicit audience.
+	`CREATE TABLE IF NOT EXISTS announcement_targets (
+		announcement_id INTEGER NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+		user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+		PRIMARY KEY (announcement_id, user_id)
+	)`,
+
+	// One row per person who pressed OK. Doubles as the read receipt the panel
+	// reports on, which is why it is not just a client-side flag.
+	`CREATE TABLE IF NOT EXISTS announcement_acks (
+		announcement_id INTEGER NOT NULL REFERENCES announcements(id) ON DELETE CASCADE,
+		user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+		acked_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
+		PRIMARY KEY (announcement_id, user_id)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_announcement_acks_user ON announcement_acks(user_id)`,
+	`CREATE INDEX IF NOT EXISTS idx_announcements_active ON announcements(active, starts_at)`,
+
+	// --- Admin audit log ---
+	// Every destructive or privacy-sensitive panel action lands here so the
+	// "who deleted that chat" question has an answer.
+	`CREATE TABLE IF NOT EXISTS admin_audit_log (
+		id         SERIAL PRIMARY KEY,
+		actor_id   TEXT REFERENCES users(id) ON DELETE SET NULL ON UPDATE CASCADE,
+		action     TEXT NOT NULL,
+		target     TEXT NOT NULL DEFAULT '',
+		detail     TEXT NOT NULL DEFAULT '',
+		created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_admin_audit_created ON admin_audit_log(created_at DESC)`,
+
+	// --- Last-seen tracking, for the panel's user detail view ---
+	`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ`,
 }
 
 // renameCascades repoints foreign keys at users(id) so that renaming a user

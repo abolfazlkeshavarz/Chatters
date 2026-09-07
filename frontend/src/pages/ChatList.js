@@ -9,6 +9,7 @@ import {
 import { addContact, getContacts, removeContact } from "../api/contacts";
 import { chatSocket } from "../services/websocket";
 import Avatar from "../components/Avatar";
+import AnnouncementBanner from "../components/AnnouncementBanner";
 import Chat from "./Chat";
 import SecureChat from "./SecureChat";
 
@@ -20,10 +21,10 @@ function formatTime(timestamp) {
     const mins = Math.floor(diffMs / 60000);
     const days = Math.floor(diffMs / 86400000);
 
-    if (mins < 1) return "Just now";
+    if (mins < 1) return "همین حالا";
     if (mins < 60) return `${mins}m`;
     if (days === 0) return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
-    if (days === 1) return "Yesterday";
+    if (days === 1) return "دیروز";
     if (days < 7) return date.toLocaleDateString([], { weekday: "short" });
     return date.toLocaleDateString([], { month: "short", day: "numeric" });
   } catch {
@@ -33,8 +34,8 @@ function formatTime(timestamp) {
 
 function chatTitle(chat, me) {
   const others = (chat.members || []).filter((u) => u !== me);
-  if (chat.is_group) return chat.name || others.join(", ") || "Group";
-  return others[0] || "Saved messages";
+  if (chat.is_group) return chat.name || others.join(", ") || "گروه";
+  return others[0] || "پیام‌های ذخیره‌شده";
 }
 
 // The "+" button opens this instead of jumping straight into a form — like
@@ -43,10 +44,10 @@ function chatTitle(chat, me) {
 // than a half-second menu.
 function ComposeMenu({ onClose, onPick }) {
   const options = [
-    { key: "contacts", icon: "👤", label: "Add contact" },
-    { key: "direct", icon: "💬", label: "New chat" },
-    { key: "secret", icon: "🔒", label: "New secret chat" },
-    { key: "group", icon: "👥", label: "New group" },
+    { key: "contacts", icon: "👤", label: "افزودن مخاطب" },
+    { key: "direct", icon: "💬", label: "گفتگوی جدید" },
+    { key: "secret", icon: "🔒", label: "گفتگوی محرمانه جدید" },
+    { key: "group", icon: "👥", label: "گروه جدید" },
   ];
 
   return (
@@ -85,24 +86,30 @@ function ContactRow({ contact, right }) {
 }
 
 function AddContactModal({ onClose, onAdded, contacts, onRemove }) {
-  const [username, setUsername] = useState("");
+  // Two ways in, because a number only finds someone whose number an admin has
+  // verified — silently searching both would make "not found" ambiguous
+  // between "no such user" and "their number is not verified yet".
+  const [mode, setMode] = useState("username");
+  const [value, setValue] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const byPhone = mode === "phone";
+
   async function submit() {
-    const target = username.trim();
+    const target = value.trim();
     if (!target) {
-      setError("Enter a username");
+      setError(byPhone ? "شماره تلفن را وارد کنید" : "نام کاربری را وارد کنید");
       return;
     }
     setBusy(true);
     setError("");
     setNotice("");
     try {
-      await onAdded(target);
-      setUsername("");
-      setNotice(`Added ${target}`);
+      const added = await onAdded(target, byPhone);
+      setValue("");
+      setNotice(`${added || target} اضافه شد`);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -114,21 +121,49 @@ function AddContactModal({ onClose, onAdded, contacts, onRemove }) {
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div style={{ padding: 20 }} className="stack">
-          <h3 style={{ margin: 0 }}>Contacts</h3>
+          <h3 style={{ margin: 0 }}>مخاطبین</h3>
+
+          <div className="row" style={{ gap: 6 }}>
+            {[
+              { id: "username", label: "با نام کاربری" },
+              { id: "phone", label: "با شماره تلفن" },
+            ].map((m) => (
+              <button
+                key={m.id}
+                className={mode === m.id ? "btn" : "btn btn-secondary"}
+                style={{ flex: 1, fontSize: 13 }}
+                onClick={() => {
+                  setMode(m.id);
+                  setError("");
+                  setNotice("");
+                }}
+              >
+                {m.label}
+              </button>
+            ))}
+          </div>
 
           <div className="row">
             <input
               className="field"
               style={{ flex: 1 }}
-              placeholder="Add by username"
-              value={username}
-              onChange={(e) => setUsername(e.target.value)}
+              dir={byPhone ? "ltr" : undefined}
+              type={byPhone ? "tel" : "text"}
+              placeholder={byPhone ? "+98…" : "نام کاربری"}
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && submit()}
             />
             <button className="btn" onClick={submit} disabled={busy}>
-              {busy ? "…" : "Add"}
+              {busy ? "…" : "افزودن"}
             </button>
           </div>
+
+          {byPhone && (
+            <div className="muted" style={{ fontSize: 12, lineHeight: 1.7 }}>
+              فقط شماره‌هایی پیدا می‌شوند که توسط مدیر تأیید شده باشند.
+            </div>
+          )}
 
           {error && <div className="error-text">{error}</div>}
           {notice && <div className="muted">{notice}</div>}
@@ -136,7 +171,7 @@ function AddContactModal({ onClose, onAdded, contacts, onRemove }) {
           <div className="scroll-area" style={{ maxHeight: 320 }}>
             {contacts.length === 0 && (
               <div className="muted" style={{ padding: "12px 0" }}>
-                No contacts yet.
+                هنوز مخاطبی ندارید.
               </div>
             )}
             {contacts.map((ct) => (
@@ -148,7 +183,7 @@ function AddContactModal({ onClose, onAdded, contacts, onRemove }) {
                     className="btn btn-secondary"
                     style={styles.smallBtn}
                     onClick={() => onRemove(ct.id)}
-                    title="Remove"
+                    title="حذف"
                   >
                     ✕
                   </button>
@@ -159,7 +194,7 @@ function AddContactModal({ onClose, onAdded, contacts, onRemove }) {
 
           <div className="row" style={{ justifyContent: "flex-end" }}>
             <button className="btn btn-secondary" onClick={onClose}>
-              Done
+              پایان
             </button>
           </div>
         </div>
@@ -205,13 +240,17 @@ function PickContactsModal({ mode, contacts, onClose, onCreate, onOpenContacts }
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div style={{ padding: 20 }} className="stack">
           <h3 style={{ margin: 0 }}>
-            {isGroup ? "New group" : isSecret ? "🔒 New secret chat" : "New chat"}
+            {isGroup
+              ? "گروه جدید"
+              : isSecret
+              ? "🔒 گفتگوی محرمانه جدید"
+              : "گفتگوی جدید"}
           </h3>
 
           {isGroup && (
             <input
               className="field"
-              placeholder="Group name (optional)"
+              placeholder="نام گروه (اختیاری)"
               value={name}
               onChange={(e) => setName(e.target.value)}
             />
@@ -219,7 +258,7 @@ function PickContactsModal({ mode, contacts, onClose, onCreate, onOpenContacts }
 
           {contacts.length === 0 ? (
             <div className="stack" style={{ alignItems: "center", padding: "16px 0" }}>
-              <div className="muted">You have no contacts yet.</div>
+              <div className="muted">هنوز مخاطبی ندارید.</div>
               <button className="btn" onClick={onOpenContacts}>
                 👤 Add a contact
               </button>
@@ -265,7 +304,7 @@ function PickContactsModal({ mode, contacts, onClose, onCreate, onOpenContacts }
                 onClick={() => create(selected)}
                 disabled={busy || selected.length === 0}
               >
-                {busy ? "Creating…" : `Create (${selected.length})`}
+                {busy ? "در حال ساخت…" : `Create (${selected.length})`}
               </button>
             )}
           </div>
@@ -307,7 +346,7 @@ export default function ChatList({ initialChatId }) {
       setError("");
       return list;
     } catch (err) {
-      setError(err.message || "Failed to load chats");
+      setError(err.message || "دریافت گفتگوها ناموفق بود");
       return [];
     } finally {
       setLoading(false);
@@ -394,9 +433,12 @@ export default function ChatList({ initialChatId }) {
     }
   }
 
-  async function handleAddContact(username) {
-    await addContact(username);
+  // Returns the username that was actually added: adding by phone resolves to
+  // an account the caller has not seen, so the confirmation has to name it.
+  async function handleAddContact(target, byPhone) {
+    const res = await addContact(byPhone ? null : target, byPhone ? target : null);
     await loadContacts();
+    return res?.id || target;
   }
 
   async function handleRemoveContact(userId) {
@@ -422,7 +464,7 @@ export default function ChatList({ initialChatId }) {
       scope === "everyone"
         ? "Delete this secret chat for both of you? This cannot be undone."
         : chat.is_group
-        ? "Leave this group?"
+        ? "از این گروه خارج می‌شوید؟"
         : "Remove this chat from your list? The other person keeps their copy.";
     if (!window.confirm(label)) return;
 
@@ -431,7 +473,7 @@ export default function ChatList({ initialChatId }) {
     try {
       await deleteChat(chat.id, scope);
     } catch (err) {
-      setError(err.message || "Could not delete the chat");
+      setError(err.message || "حذف گفتگو ناموفق بود");
       load();
     }
   }
@@ -507,21 +549,25 @@ export default function ChatList({ initialChatId }) {
 
       <div className="app-header">
         <div style={{ flex: 1 }}>
-          <h2 style={{ margin: 0, fontSize: 20 }}>Chats</h2>
+          <h2 style={{ margin: 0, fontSize: 20 }}>گفتگوها</h2>
           <div className="muted">
-            Logged in as <strong>{me}</strong>
+            وارد شده به عنوان <strong>{me}</strong>
           </div>
         </div>
         <button
           className="btn"
           style={styles.composeBtn}
           onClick={() => setModal("menu")}
-          aria-label="New"
-          title="New chat, group or contact"
+          aria-label="جدید"
+          title="گفتگو، گروه یا مخاطب جدید"
         >
           +
         </button>
       </div>
+
+      {/* Admin notices sit above the list, not inside it, so they stay put
+          while the conversations scroll. */}
+      <AnnouncementBanner />
 
       {error && (
         <div className="error-text" style={{ padding: "0 12px" }}>
@@ -530,13 +576,13 @@ export default function ChatList({ initialChatId }) {
       )}
 
       <div className="scroll-area" style={styles.list}>
-        {loading && <div style={styles.empty}>Loading…</div>}
+        {loading && <div style={styles.empty}>در حال بارگذاری…</div>}
 
         {!loading && chats.length === 0 && (
           <div style={styles.empty}>
             <div style={{ fontSize: 40 }}>💬</div>
-            <div>No chats yet</div>
-            <div className="muted">Start a conversation above</div>
+            <div>هنوز گفتگویی نیست</div>
+            <div className="muted">از دکمه بالا یک گفتگو شروع کنید</div>
           </div>
         )}
 
@@ -552,13 +598,13 @@ export default function ChatList({ initialChatId }) {
           } else if (chat.last_message) {
             const prefix =
               chat.last_message_sender === me
-                ? "You: "
+                ? "شما: "
                 : chat.is_group && chat.last_message_sender
                 ? `${chat.last_message_sender}: `
                 : "";
             preview = prefix + chat.last_message;
           } else {
-            preview = "No messages yet";
+            preview = "هنوز پیامی نیست";
           }
 
           if (preview.length > 42) preview = `${preview.slice(0, 40)}…`;
@@ -592,20 +638,20 @@ export default function ChatList({ initialChatId }) {
                 <div style={styles.chatTop}>
                   <div style={styles.chatTitle}>
                     {(chat.e2e_enabled || chat.is_secret) && (
-                      <span title={chat.is_secret ? "Secret chat" : "End-to-end encrypted"}>🔒 </span>
+                      <span title={chat.is_secret ? "گفتگوی محرمانه" : "رمزنگاری سرتاسری"}>🔒 </span>
                     )}
                     {title}
                     {chat.is_secret && <span className="badge badge-secure"> secret</span>}
                     {chat.is_group && <span className="badge"> group</span>}
                     {chat.self_destruct_seconds > 0 && (
-                      <span title="Self-destruct timer on" style={{ opacity: 0.7 }}> 🔥</span>
+                      <span title="زمان‌سنج خودتخریبی فعال است" style={{ opacity: 0.7 }}> 🔥</span>
                     )}
-                    {chat.muted && <span title="Muted" style={{ opacity: 0.5 }}> 🔕</span>}
+                    {chat.muted && <span title="بی‌صدا" style={{ opacity: 0.5 }}> 🔕</span>}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
                     <button
                       onClick={(e) => toggleMute(chat, e)}
-                      title={chat.muted ? "Unmute" : "Mute notifications"}
+                      title={chat.muted ? "فعال کردن صدا" : "بی‌صدا کردن اعلان‌ها"}
                       style={styles.muteBtn}
                     >
                       {chat.muted ? "🔕" : "🔔"}
@@ -614,7 +660,7 @@ export default function ChatList({ initialChatId }) {
                       onClick={(e) =>
                         handleDeleteChat(chat, chat.is_secret ? "everyone" : "me", e)
                       }
-                      title={chat.is_group ? "Leave group" : "Delete chat"}
+                      title={chat.is_group ? "خروج از گروه" : "حذف گفتگو"}
                       style={styles.muteBtn}
                     >
                       🗑

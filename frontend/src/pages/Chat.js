@@ -54,20 +54,20 @@ export default function Chat({ chatId, title, chat, onBack, onChatPatch, onOpenC
     try {
       await deleteMessage(message.id, scope);
     } catch (err) {
-      setChatError(err.message || "Could not delete the message");
+      setChatError(err.message || "حذف پیام ناموفق بود");
     }
   }
 
   async function handleStartSecret() {
     if (chat?.is_group) {
-      setError("Secret chats are one-to-one only.");
+      setError("گفتگوی محرمانه فقط بین دو نفر ممکن است.");
       return;
     }
     if (
       !window.confirm(
-        "Start a secret chat with this person?\n\n" +
-          "It opens as a separate, end-to-end encrypted conversation once they " +
-          "accept. This chat is unchanged."
+        "با این شخص گفتگوی محرمانه شروع شود؟\n\n" +
+          "پس از پذیرش او، یک گفتگوی جداگانه با رمزنگاری سرتاسری باز می‌شود. " +
+          "این گفتگو بدون تغییر می‌ماند."
       )
     ) {
       return;
@@ -77,10 +77,10 @@ export default function Chat({ chatId, title, chat, onBack, onChatPatch, onOpenC
     setError("");
     try {
       const { chat_id: secretId } = await createSecretChat(otherMember);
-      setNotice("Secret chat request sent.");
+      setNotice("درخواست گفتگوی محرمانه ارسال شد.");
       onOpenChat?.(secretId);
     } catch (err) {
-      setError(err.message || "Could not start the secret chat");
+      setError(err.message || "شروع گفتگوی محرمانه ناموفق بود");
     } finally {
       setBusy(false);
     }
@@ -93,7 +93,7 @@ export default function Chat({ chatId, title, chat, onBack, onChatPatch, onOpenC
       await setChatMute(chatId, next);
     } catch (err) {
       onChatPatch?.({ muted: !next });
-      setError(err.message || "Could not update mute setting");
+      setError(err.message || "تغییر تنظیم بی‌صدا ناموفق بود");
     }
   }
 
@@ -101,7 +101,7 @@ export default function Chat({ chatId, title, chat, onBack, onChatPatch, onOpenC
     <div className="pane">
       <div className="app-header">
         {onBack && (
-          <button onClick={onBack} style={styles.back} aria-label="Back">
+          <button onClick={onBack} style={styles.back} aria-label="بازگشت">
             ←
           </button>
         )}
@@ -111,13 +111,13 @@ export default function Chat({ chatId, title, chat, onBack, onChatPatch, onOpenC
         <div style={styles.titleBox}>
           <div style={styles.title}>{title}</div>
           <div className="muted" style={{ fontSize: 12 }}>
-            Not encrypted
+            بدون رمزنگاری
           </div>
         </div>
 
         <button
           onClick={handleToggleMute}
-          title={chat?.muted ? "Unmute notifications" : "Mute notifications"}
+          title={chat?.muted ? "فعال کردن اعلان‌ها" : "بی‌صدا کردن اعلان‌ها"}
           style={styles.muteBtn}
         >
           {chat?.muted ? "🔕" : "🔔"}
@@ -128,9 +128,9 @@ export default function Chat({ chatId, title, chat, onBack, onChatPatch, onOpenC
             className="badge"
             onClick={handleStartSecret}
             disabled={busy}
-            title="Start a secret (end-to-end encrypted) chat"
+            title="شروع گفتگوی محرمانه (رمزنگاری سرتاسری)"
           >
-            {busy ? "…" : "🔒 Secret chat"}
+            {busy ? "…" : "🔒 گفتگوی محرمانه"}
           </button>
         )}
       </div>

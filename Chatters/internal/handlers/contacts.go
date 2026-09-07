@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"messenger/internal/db"
+	"messenger/internal/validate"
 
 	"github.com/gin-gonic/gin"
 )
@@ -51,37 +52,63 @@ func ListContacts(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"contacts": contacts})
 }
 
-// AddContact adds a user as a contact by username. One-directional: it does
-// not require or imply that they add you back, and does not notify them —
-// this only populates your own picker.
+// AddContact adds a user as a contact by username or by phone number.
+// One-directional: it does not require or imply that they add you back, and
+// does not notify them — this only populates your own picker.
+//
+// Only a *verified* number resolves to an account. An unverified one is just
+// text somebody typed about themselves, and matching on it would let anyone
+// claim a number and be added as its owner.
 func AddContact(c *gin.Context) {
 	userID := c.GetString("user_id")
 
 	var req struct {
 		Username string `json:"username"`
+		Phone    string `json:"phone"`
 	}
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
 		return
 	}
 
-	target := strings.TrimSpace(req.Username)
-	if target == "" {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "username required"})
-		return
-	}
-	if target == userID {
-		c.JSON(http.StatusBadRequest, gin.H{"error": "you cannot add yourself as a contact"})
+	var target string
+
+	switch {
+	case strings.TrimSpace(req.Phone) != "":
+		phone, err := validate.Phone(req.Phone)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		err = db.DB.QueryRow(
+			`SELECT id FROM users WHERE phone = $1 AND phone_verified`, phone,
+		).Scan(&target)
+		if err != nil {
+			c.JSON(http.StatusNotFound, gin.H{"error": "no account with that verified phone number"})
+			return
+		}
+
+	case strings.TrimSpace(req.Username) != "":
+		target = strings.TrimSpace(req.Username)
+		var exists bool
+		if err := db.DB.QueryRow(
+			`SELECT EXISTS (SELECT 1 FROM users WHERE id = $1)`, target,
+		).Scan(&exists); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to look up user"})
+			return
+		}
+		if !exists {
+			c.JSON(http.StatusNotFound, gin.H{"error": "no user with that username"})
+			return
+		}
+
+	default:
+		c.JSON(http.StatusBadRequest, gin.H{"error": "a username or phone number is required"})
 		return
 	}
 
-	var exists bool
-	if err := db.DB.QueryRow(`SELECT EXISTS (SELECT 1 FROM users WHERE id = $1)`, target).Scan(&exists); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to look up user"})
-		return
-	}
-	if !exists {
-		c.JSON(http.StatusNotFound, gin.H{"error": "no user with that username"})
+	if target == userID {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "you cannot add yourself as a contact"})
 		return
 	}
 

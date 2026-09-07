@@ -79,7 +79,7 @@ export default function Composer({
       onDragLeave={() => setDragOver(false)}
       onDrop={onDrop}
     >
-      {dragOver && <div style={styles.dropHint}>Drop to send</div>}
+      {dragOver && <div style={styles.dropHint}>برای ارسال رها کنید</div>}
       {replyTo && (
         <div style={styles.replyBar}>
           <div style={styles.replyBody}>
@@ -88,7 +88,7 @@ export default function Composer({
               {replyTo.content || replyTo.filename || "attachment"}
             </div>
           </div>
-          <button onClick={onCancelReply} aria-label="Cancel reply" style={styles.cancel}>
+          <button onClick={onCancelReply} aria-label="لغو پاسخ" style={styles.cancel}>
             ✕
           </button>
         </div>
@@ -101,7 +101,7 @@ export default function Composer({
               style={styles.iconBtn}
               onClick={() => fileRef.current?.click()}
               disabled={disabled}
-              aria-label="Attach file"
+              aria-label="پیوست فایل"
             >
               📎
             </button>
@@ -139,7 +139,7 @@ export default function Composer({
           style={{ ...styles.send, opacity: text.trim() && !busy ? 1 : 0.5 }}
           onClick={submit}
           disabled={!text.trim() || busy || disabled}
-          aria-label="Send"
+          aria-label="ارسال"
         >
           ➤
         </button>

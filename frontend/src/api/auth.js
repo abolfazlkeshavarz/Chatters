@@ -59,18 +59,26 @@ async function establishIdentity(username, password, bundle, needsSetup) {
   }
 }
 
-export async function register(username, email, password) {
+/**
+ * File a signup request. This does NOT create an account — an administrator
+ * approves it from the panel first, and only then can the person sign in.
+ *
+ * The key pair is generated and wrapped here anyway, and stored with the
+ * request, so the account keeps this identity when it is approved and the same
+ * password the user chose still unwraps it.
+ */
+export async function register(username, email, password, phone) {
   let keys;
   try {
     keys = await wrapIdentity(await generateIdentity(), password);
   } catch {
-    keys = undefined; // account still gets created, key set up at first login
+    keys = undefined; // key set up at first login instead
   }
 
   return request("/register", {
     method: "POST",
     auth: false,
-    body: { username, email, password, keys },
+    body: { username, email, phone: phone || "", password, keys },
   });
 }
 

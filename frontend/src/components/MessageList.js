@@ -34,7 +34,7 @@ function SelfDestructBadge({ expiresAt, now }) {
       : secs < 86400
       ? `${Math.ceil(secs / 3600)}h`
       : `${Math.ceil(secs / 86400)}d`;
-  return <span title="Self-destructs after sending"> · 🔥 {label}</span>;
+  return <span title="مدتی پس از ارسال حذف می‌شود"> · 🔥 {label}</span>;
 }
 
 /** image | video | file — from the mime type, with a filename-extension fallback. */
@@ -146,10 +146,10 @@ function MediaAttachment({ message, onOpen, onDownload, onRetry }) {
   if (message.failed) {
     return (
       <div style={styles.mediaFailed}>
-        <span>⚠️ Upload failed — {label}</span>
+        <span>⚠️ بارگذاری ناموفق بود — {label}</span>
         {onRetry && (
           <button style={styles.retryBtn} onClick={() => onRetry(message)}>
-            Retry
+            تلاش دوباره
           </button>
         )}
       </div>
@@ -168,7 +168,7 @@ function MediaAttachment({ message, onOpen, onDownload, onRetry }) {
           />
         ) : (
           <div style={styles.mediaPlaceholder}>
-            {failed ? "🖼️ failed to load" : <span className="spinner" />}
+            {failed ? "🖼️ بارگذاری ناموفق بود" : <span className="spinner" />}
           </div>
         )}
         {message.pending && (
@@ -201,7 +201,7 @@ function MediaAttachment({ message, onOpen, onDownload, onRetry }) {
               <>
                 <span style={styles.playGlyph}>▶</span>
                 <span style={styles.mediaHint}>
-                  {failed ? "tap to retry" : "Video"}
+                  {failed ? "برای تلاش دوباره ضربه بزنید" : "ویدیو"}
                 </span>
               </>
             )}
@@ -215,7 +215,7 @@ function MediaAttachment({ message, onOpen, onDownload, onRetry }) {
         {videoOpen && url && (
           <button
             style={styles.expandBtn}
-            aria-label="Fullscreen"
+            aria-label="تمام‌صفحه"
             onClick={() => onOpen({ url, filename: label, kind })}
           >
             ⤢
@@ -246,12 +246,12 @@ function MediaAttachment({ message, onOpen, onDownload, onRetry }) {
 /** Body of a message, accounting for attachments and encryption failures. */
 function MessageBody({ message, onOpen, onDownload, onRetry }) {
   if (message.decryptError === "locked") {
-    return <em style={styles.systemNote}>🔒 Unlock secure chat to read this message</em>;
+    return <em style={styles.systemNote}>🔒 برای خواندن این پیام، گفتگوی محرمانه را باز کنید</em>;
   }
   if (message.decryptError === "failed") {
     return (
       <em style={styles.systemNote}>
-        🔒 Cannot decrypt — this message was sent to a different key
+        🔒 رمزگشایی ممکن نیست — این پیام برای کلید دیگری ارسال شده است
       </em>
     );
   }
@@ -373,9 +373,9 @@ export default function MessageList({
   // Colour alone is not an accessible signal, so the state is also exposed as
   // text to assistive technology and on hover.
   const STATUS_LABEL = {
-    sent: "Sent",
-    delivered: "Delivered",
-    seen: "Read",
+    sent: "ارسال شد",
+    delivered: "تحویل شد",
+    seen: "خوانده شد",
   };
 
   return (
@@ -400,7 +400,7 @@ export default function MessageList({
       <div className="scroll-area" ref={scrollRef} onScroll={onScroll} style={styles.list}>
         {messages.length === 0 && (
           <div style={styles.empty}>
-            {secure ? "🔒 No messages yet in this secure chat" : "No messages yet"}
+            {secure ? "🔒 هنوز پیامی در این گفتگوی محرمانه نیست" : "هنوز پیامی نیست"}
           </div>
         )}
 
@@ -471,9 +471,9 @@ export default function MessageList({
                 />
 
                 <div style={styles.meta}>
-                  {secure && <span title="End-to-end encrypted">🔒 </span>}
+                  {secure && <span title="رمزنگاری سرتاسری">🔒 </span>}
                   {m.pending
-                    ? `Uploading… ${Math.round(m.progress || 0)}%`
+                    ? `در حال بارگذاری… ${Math.round(m.progress || 0)}%`
                     : formatTime(m.created_at)}
                   {m.expires_at && (
                     <SelfDestructBadge expiresAt={m.expires_at} now={now} />
@@ -495,16 +495,16 @@ export default function MessageList({
                         setHeldId(null);
                       }}
                     >
-                      ↩ Reply
+                      ↩ پاسخ
                     </button>
                     {!isMedia(m) && !m.decryptError && (
                       <button style={styles.action} onClick={() => copy(m)}>
-                        📋 Copy
+                        📋 کپی
                       </button>
                     )}
                     {isMedia(m) && !m.failed && (
                       <button style={styles.action} onClick={() => download(m)}>
-                        📥 Save
+                        📥 ذخیره
                       </button>
                     )}
                     {onDelete && (
@@ -515,7 +515,7 @@ export default function MessageList({
                           setHeldId(null);
                         }}
                       >
-                        🗑 Delete for me
+                        🗑 حذف برای من
                       </button>
                     )}
                     {onDelete && canDeleteEveryone && (
@@ -526,7 +526,7 @@ export default function MessageList({
                           setHeldId(null);
                         }}
                       >
-                        🗑 Delete for everyone
+                        🗑 حذف برای همه
                       </button>
                     )}
                     <button style={styles.action} onClick={() => setHeldId(null)}>

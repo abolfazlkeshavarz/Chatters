@@ -183,7 +183,11 @@ func GetAvatar(c *gin.Context) {
 		return
 	}
 
-	if target != viewer && visibility.String == "contacts" && !contactsEitherWay(target, viewer) {
+	// Administrators see every photo regardless of the owner's visibility
+	// setting: the panel is a moderation tool, and "contacts only" is a choice
+	// about other users, not about the operator of the server the file sits on.
+	if !isAdminCtx(c) &&
+		target != viewer && visibility.String == "contacts" && !contactsEitherWay(target, viewer) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "no avatar"})
 		return
 	}

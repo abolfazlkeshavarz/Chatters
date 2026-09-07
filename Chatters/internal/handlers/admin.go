@@ -14,15 +14,23 @@ import (
 )
 
 type adminUser struct {
-	ID        string    `json:"id"`
-	Email     string    `json:"email"`
-	IsAdmin   bool      `json:"is_admin"`
-	HasKeys   bool      `json:"has_keys"`
-	CreatedAt time.Time `json:"created_at"`
-	ChatCount int       `json:"chat_count"`
+	ID               string     `json:"id"`
+	Email            string     `json:"email"`
+	Phone            *string    `json:"phone,omitempty"`
+	PhoneVerified    bool       `json:"phone_verified"`
+	IsAdmin          bool       `json:"is_admin"`
+	HasKeys          bool       `json:"has_keys"`
+	HasAvatar        bool       `json:"has_avatar"`
+	AvatarVisibility string     `json:"avatar_visibility"`
+	CreatedAt        time.Time  `json:"created_at"`
+	LastSeenAt       *time.Time `json:"last_seen_at,omitempty"`
+	ChatCount        int        `json:"chat_count"`
+	MessageCount     int        `json:"message_count"`
 }
 
-// AdminListUsers returns a paginated, optionally filtered user list.
+// AdminListUsers returns a paginated, optionally filtered user list. The phone
+// number is searchable alongside the username and email so the panel can find
+// an account from any of the three identifiers a person might quote.
 func AdminListUsers(c *gin.Context) {
 	search := "%" + c.Query("search") + "%"
 
@@ -36,10 +44,14 @@ func AdminListUsers(c *gin.Context) {
 	}
 
 	rows, err := db.DB.Query(
-		`SELECT u.id, u.email, u.is_admin, u.public_key IS NOT NULL, u.created_at,
-		        (SELECT COUNT(*) FROM chat_members cm WHERE cm.user_id = u.id)
+		`SELECT u.id, u.email, u.phone, u.phone_verified, u.is_admin,
+		        u.public_key IS NOT NULL,
+		        u.avatar_path IS NOT NULL AND u.avatar_path <> '',
+		        u.avatar_visibility, u.created_at, u.last_seen_at,
+		        (SELECT COUNT(*) FROM chat_members cm WHERE cm.user_id = u.id),
+		        (SELECT COUNT(*) FROM messages m WHERE m.sender_id = u.id)
 		 FROM users u
-		 WHERE u.id ILIKE $1 OR u.email ILIKE $1
+		 WHERE u.id ILIKE $1 OR u.email ILIKE $1 OR COALESCE(u.phone,'') ILIKE $1
 		 ORDER BY u.created_at DESC
 		 LIMIT $2 OFFSET $3`,
 		search, limit, offset,
@@ -53,15 +65,29 @@ func AdminListUsers(c *gin.Context) {
 	users := []adminUser{}
 	for rows.Next() {
 		var u adminUser
-		if err := rows.Scan(&u.ID, &u.Email, &u.IsAdmin, &u.HasKeys, &u.CreatedAt, &u.ChatCount); err != nil {
+		var phone, avatarVisibility sql.NullString
+		var lastSeen sql.NullTime
+		if err := rows.Scan(
+			&u.ID, &u.Email, &phone, &u.PhoneVerified, &u.IsAdmin, &u.HasKeys,
+			&u.HasAvatar, &avatarVisibility, &u.CreatedAt, &lastSeen,
+			&u.ChatCount, &u.MessageCount,
+		); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read users"})
 			return
+		}
+		u.Phone = nullStr(phone)
+		u.AvatarVisibility = avatarVisibility.String
+		if lastSeen.Valid {
+			u.LastSeenAt = &lastSeen.Time
 		}
 		users = append(users, u)
 	}
 
 	var total int
-	_ = db.DB.QueryRow(`SELECT COUNT(*) FROM users WHERE id ILIKE $1 OR email ILIKE $1`, search).Scan(&total)
+	_ = db.DB.QueryRow(
+		`SELECT COUNT(*) FROM users WHERE id ILIKE $1 OR email ILIKE $1 OR COALESCE(phone,'') ILIKE $1`,
+		search,
+	).Scan(&total)
 
 	c.JSON(http.StatusOK, gin.H{"users": users, "total": total})
 }
@@ -243,20 +269,49 @@ func AdminSetRole(c *gin.Context) {
 }
 
 func AdminStats(c *gin.Context) {
-	var users, chats, messages, encrypted, e2eChats int
+	var (
+		users, chats, messages, encrypted, e2eChats     int
+		secretChats, mediaMessages, admins              int
+		pendingRegs, pendingPhones, publicFiles         int
+		privateFiles, announcements, activeAnnouncements int
+		storageBytes                                    int64
+	)
 
 	_ = db.DB.QueryRow(`SELECT COUNT(*) FROM users`).Scan(&users)
+	_ = db.DB.QueryRow(`SELECT COUNT(*) FROM users WHERE is_admin`).Scan(&admins)
 	_ = db.DB.QueryRow(`SELECT COUNT(*) FROM chats`).Scan(&chats)
+	_ = db.DB.QueryRow(`SELECT COUNT(*) FROM chats WHERE is_secret`).Scan(&secretChats)
 	_ = db.DB.QueryRow(`SELECT COUNT(*) FROM messages`).Scan(&messages)
 	_ = db.DB.QueryRow(`SELECT COUNT(*) FROM messages WHERE is_encrypted`).Scan(&encrypted)
+	_ = db.DB.QueryRow(`SELECT COUNT(*) FROM messages WHERE file_path IS NOT NULL`).Scan(&mediaMessages)
 	_ = db.DB.QueryRow(`SELECT COUNT(*) FROM chats WHERE e2e_enabled`).Scan(&e2eChats)
+	_ = db.DB.QueryRow(`SELECT COUNT(*) FROM registration_requests WHERE status = 'pending'`).Scan(&pendingRegs)
+	_ = db.DB.QueryRow(`SELECT COUNT(*) FROM phone_requests WHERE status = 'pending'`).Scan(&pendingPhones)
+	_ = db.DB.QueryRow(`SELECT COUNT(*) FROM public_files WHERE visibility = 'public'`).Scan(&publicFiles)
+	_ = db.DB.QueryRow(`SELECT COUNT(*) FROM public_files WHERE visibility = 'private'`).Scan(&privateFiles)
+	_ = db.DB.QueryRow(`SELECT COUNT(*) FROM announcements`).Scan(&announcements)
+	_ = db.DB.QueryRow(
+		`SELECT COUNT(*) FROM announcements
+		 WHERE active AND starts_at <= now() AND (expires_at IS NULL OR expires_at > now())`,
+	).Scan(&activeAnnouncements)
+	_ = db.DB.QueryRow(`SELECT COALESCE(SUM(size_bytes), 0) FROM public_files`).Scan(&storageBytes)
 
 	c.JSON(http.StatusOK, gin.H{
-		"users":              users,
-		"chats":              chats,
-		"messages":           messages,
-		"encrypted_messages": encrypted,
-		"e2e_chats":          e2eChats,
+		"users":                users,
+		"admins":               admins,
+		"chats":                chats,
+		"secret_chats":         secretChats,
+		"messages":             messages,
+		"encrypted_messages":   encrypted,
+		"media_messages":       mediaMessages,
+		"e2e_chats":            e2eChats,
+		"pending_registrations": pendingRegs,
+		"pending_phones":       pendingPhones,
+		"public_files":         publicFiles,
+		"private_files":        privateFiles,
+		"announcements":        announcements,
+		"active_announcements": activeAnnouncements,
+		"library_bytes":        storageBytes,
 	})
 }
 

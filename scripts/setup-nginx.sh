@@ -170,6 +170,30 @@ ${h2_directive}
     # smaller, uploads fail here before ever reaching the app.
     client_max_body_size 20M;
 
+    # The upload endpoints are exempt: their real limit depends on who is
+    # asking (administrators are uncapped, everyone else is held to
+    # MAX_UPLOAD_BYTES), and nginx cannot tell the two apart because it never
+    # inspects the bearer token. A fixed ceiling here would 413 an admin's
+    # large upload before the app could allow it, so the app is left as the
+    # only authority on size.
+    location ~ ^/api/(media|files)\$ {
+        client_max_body_size 0;
+        proxy_request_buffering off;
+
+        proxy_pass http://127.0.0.1:${CHAT_PORT};
+        proxy_http_version 1.1;
+
+        proxy_set_header Host              \$http_host;
+        proxy_set_header X-Real-IP         \$remote_addr;
+        proxy_set_header X-Forwarded-For   \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+
+        # A large upload over a slow link must not hit the default timeout
+        # partway through.
+        proxy_read_timeout 3600;
+        proxy_send_timeout 3600;
+    }
+
     location / {
         proxy_pass http://127.0.0.1:${CHAT_PORT};
         proxy_http_version 1.1;

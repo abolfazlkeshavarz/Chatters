@@ -1,12 +1,133 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   listChats,
   getChatMessages,
   deleteChatAdmin,
   deleteMessageAdmin,
+  fetchAdminMediaURL,
 } from "../api/admin";
+import ImageModal from "../components/ImageModal";
 
 const PAGE_SIZE = 30;
+
+function attachmentKind(message) {
+  const mime = message.mime_type || "";
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("video/")) return "video";
+  if (mime.startsWith("audio/")) return "audio";
+  const name = message.filename || "";
+  if (/\.(jpe?g|png|gif|webp|avif|bmp)$/i.test(name)) return "image";
+  if (/\.(mp4|webm|mov|m4v|mkv)$/i.test(name)) return "video";
+  if (/\.(mp3|wav|ogg|m4a)$/i.test(name)) return "audio";
+  return "file";
+}
+
+/**
+ * A chat attachment, opened through the admin endpoint that skips the
+ * membership check.
+ *
+ * Loaded on demand rather than eagerly: opening a transcript should not pull
+ * every attachment in it down the wire, and each fetch is written to the audit
+ * log — so a click here is a deliberate, recorded act.
+ */
+function AdminAttachment({ message, onError }) {
+  const kind = attachmentKind(message);
+  const [url, setUrl] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [preview, setPreview] = useState(false);
+
+  const urlRef = useRef(null);
+  useEffect(() => {
+    urlRef.current = url;
+  }, [url]);
+  useEffect(
+    () => () => {
+      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+    },
+    []
+  );
+
+  async function open() {
+    if (url) {
+      setPreview(true);
+      return;
+    }
+    setLoading(true);
+    try {
+      const u = await fetchAdminMediaURL(message.id);
+      setUrl(u);
+      if (kind === "image" || kind === "video") setPreview(true);
+    } catch (err) {
+      onError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function save() {
+    if (!url) return;
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = message.filename || "file";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+  }
+
+  const icon = { image: "🖼️", video: "🎬", audio: "🎵", file: "📎" }[kind];
+
+  return (
+    <div style={{ marginTop: 4 }}>
+      {preview && url && (kind === "image" || kind === "video") && (
+        <ImageModal
+          imageUrl={url}
+          filename={message.filename}
+          isVideo={kind === "video"}
+          onClose={() => setPreview(false)}
+          onDownload={save}
+        />
+      )}
+
+      <div className="row" style={{ gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+        <span style={{ fontSize: 13 }}>
+          {icon} {message.filename || message.content}
+        </span>
+        <button
+          className="btn btn-secondary"
+          style={{ fontSize: 11, padding: "3px 9px" }}
+          onClick={open}
+          disabled={loading}
+        >
+          {loading ? "…" : url ? "View" : "Open"}
+        </button>
+        {url && (
+          <button
+            className="btn btn-secondary"
+            style={{ fontSize: 11, padding: "3px 9px" }}
+            onClick={save}
+          >
+            📥
+          </button>
+        )}
+      </div>
+
+      {url && kind === "image" && (
+        <img
+          src={url}
+          alt={message.filename}
+          style={styles.thumb}
+          onClick={() => setPreview(true)}
+        />
+      )}
+      {url && kind === "video" && (
+        <video src={url} style={styles.thumb} controls preload="metadata" />
+      )}
+      {url && kind === "audio" && (
+        <audio src={url} controls style={{ marginTop: 6, width: "100%", maxWidth: 300 }} />
+      )}
+    </div>
+  );
+}
 
 function fmt(ts) {
   if (!ts) return "";
@@ -260,10 +381,17 @@ export default function AdminChats({ onNotice, onError }) {
                       <div dir="auto" style={styles.msgBody}>
                         {m.is_encrypted
                           ? `🔒 ciphertext (${m.content.length} chars) — not decryptable here`
-                          : m.type === "media"
-                          ? `📎 ${m.filename || m.content}`
+                          : m.has_file
+                          ? null
                           : m.content}
                       </div>
+
+                      {/* Attachments are viewable, not just named: an admin who
+                          can already read every message body gains nothing from
+                          being shown only a filename. */}
+                      {m.has_file && !m.is_encrypted && (
+                        <AdminAttachment message={m} onError={onError} />
+                      )}
                     </div>
                     <button
                       className="btn btn-danger"
@@ -291,6 +419,16 @@ export default function AdminChats({ onNotice, onError }) {
 }
 
 const styles = {
+  thumb: {
+    display: "block",
+    marginTop: 6,
+    maxWidth: 240,
+    maxHeight: 180,
+    borderRadius: 8,
+    objectFit: "cover",
+    cursor: "pointer",
+    background: "#000",
+  },
   msgRow: {
     display: "flex",
     gap: 10,

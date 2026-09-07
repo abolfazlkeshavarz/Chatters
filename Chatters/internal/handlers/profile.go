@@ -1,6 +1,7 @@
 package handlers
 
 import (
+	"database/sql"
 	"net/http"
 
 	"messenger/internal/db"
@@ -130,22 +131,31 @@ func Me(c *gin.Context) {
 	userID := c.GetString("user_id")
 	isAdmin, _ := c.Get("is_admin")
 
-	var hasKeys, hasAvatar bool
+	var hasKeys, hasAvatar, phoneVerified bool
 	var avatarVisibility string
+	var email string
+	var phone, pendingPhone sql.NullString
 	_ = db.DB.QueryRow(
-		`SELECT public_key IS NOT NULL AND public_key <> '',
-		        avatar_path IS NOT NULL AND avatar_path <> '',
-		        avatar_visibility
-		 FROM users WHERE id = $1`,
+		`SELECT u.email,
+		        u.public_key IS NOT NULL AND u.public_key <> '',
+		        u.avatar_path IS NOT NULL AND u.avatar_path <> '',
+		        u.avatar_visibility, u.phone, u.phone_verified,
+		        (SELECT p.phone FROM phone_requests p
+		          WHERE p.user_id = u.id AND p.status = 'pending' LIMIT 1)
+		 FROM users u WHERE u.id = $1`,
 		userID,
-	).Scan(&hasKeys, &hasAvatar, &avatarVisibility)
+	).Scan(&email, &hasKeys, &hasAvatar, &avatarVisibility, &phone, &phoneVerified, &pendingPhone)
 
 	c.JSON(http.StatusOK, gin.H{
 		"user_id":           userID,
 		"username":          userID,
+		"email":             email,
 		"is_admin":          isAdmin == true,
 		"has_keys":          hasKeys,
 		"has_avatar":        hasAvatar,
 		"avatar_visibility": avatarVisibility,
+		"phone":             nullStr(phone),
+		"phone_verified":    phoneVerified,
+		"pending_phone":     nullStr(pendingPhone),
 	})
 }

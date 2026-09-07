@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import ChatList from "./ChatList";
 import Profile from "./Profile";
 import Admin from "./Admin";
+import PublicFiles from "./PublicFiles";
 import { getMe } from "../api/auth";
 
 export default function Home({ onLogout, initialChatId }) {
@@ -34,6 +35,7 @@ export default function Home({ onLogout, initialChatId }) {
 
   const tabs = [
     { id: "chats", label: "💬 چت‌ها" },
+    { id: "files", label: "📁 فایل‌ها" },
     { id: "profile", label: "👤 پروفایل" },
     ...(admin ? [{ id: "admin", label: "🛠️ مدیریت" }] : []),
   ];
@@ -42,6 +44,10 @@ export default function Home({ onLogout, initialChatId }) {
     <div className="app-shell">
       <div className="app-content">
         {tab === "chats" && <ChatList initialChatId={initialChatId} />}
+
+        {/* Manages its own scrolling: the grid is the scroll container so the
+            search bar stays pinned above it. */}
+        {tab === "files" && <PublicFiles />}
 
         {/* Full-page views scroll as a whole, unlike the chat pane. */}
         {tab === "profile" && (

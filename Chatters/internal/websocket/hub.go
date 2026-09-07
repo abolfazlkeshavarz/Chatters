@@ -430,6 +430,29 @@ func (h *Hub) BroadcastEventToMembers(members []string, payload map[string]inter
 	}
 }
 
+// BroadcastEventToAll sends an event to every currently connected user.
+//
+// Only reaches people with the app open; anything that must survive a reload
+// has to be readable from the database too — an admin announcement is fetched
+// on mount for exactly that reason, and this is the live nudge on top.
+func (h *Hub) BroadcastEventToAll(payload map[string]interface{}) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+
+	h.mu.RLock()
+	users := make([]string, 0, len(h.clients))
+	for userID := range h.clients {
+		users = append(users, userID)
+	}
+	h.mu.RUnlock()
+
+	for _, userID := range users {
+		h.dispatch(userID, data)
+	}
+}
+
 // NotifyUser sends an event to every connection one user has — used for
 // actions that only concern that user, such as "delete for me", so their other
 // devices stay in sync.

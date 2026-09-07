@@ -19,10 +19,10 @@ export default function ImageModal({
   return (
     <div style={styles.overlay} role="dialog" aria-modal="true" aria-label={filename}>
       <div style={styles.header}>
-        <button style={styles.circle} onClick={onClose} aria-label="Close">
+        <button style={styles.circle} onClick={onClose} aria-label="بستن">
           ✕
         </button>
-        <button style={styles.circle} onClick={onDownload} aria-label="Download">
+        <button style={styles.circle} onClick={onDownload} aria-label="دانلود">
           📥
         </button>
       </div>

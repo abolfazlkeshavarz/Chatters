@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { logout, getMe } from "../api/auth";
 import { api } from "../api/client";
 import { deleteAvatar, setAvatarVisibility, uploadAvatar } from "../api/avatar";
+import { cancelPhoneRequest, removeMyPhone, requestPhone } from "../api/phone";
 import Avatar from "../components/Avatar";
 import {
   disablePush,
@@ -45,18 +46,80 @@ export default function Profile({ onLogout }) {
   const [avatarRefresh, setAvatarRefresh] = useState(0);
   const fileInputRef = useRef(null);
 
+  const [phone, setPhone] = useState(null);
+  const [phoneVerified, setPhoneVerified] = useState(false);
+  const [pendingPhone, setPendingPhone] = useState(null);
+  const [newPhone, setNewPhone] = useState("");
+  const [phoneBusy, setPhoneBusy] = useState(false);
+
   const support = pushSupport();
+
+  const refreshMe = useCallback(() => {
+    return getMe()
+      .then((me) => {
+        setHasAvatar(Boolean(me.has_avatar));
+        setVisibility(me.avatar_visibility || "public");
+        setPhone(me.phone || null);
+        setPhoneVerified(Boolean(me.phone_verified));
+        setPendingPhone(me.pending_phone || null);
+      })
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     loadIdentity(username).then((id) => setHasKey(Boolean(id)));
     isSubscribed().then(setPushOn);
-    getMe()
-      .then((me) => {
-        setHasAvatar(Boolean(me.has_avatar));
-        setVisibility(me.avatar_visibility || "public");
-      })
-      .catch(() => {});
-  }, [username]);
+    refreshMe();
+  }, [username, refreshMe]);
+
+  async function handleRequestPhone() {
+    const value = newPhone.trim();
+    if (!value) {
+      setError("شماره تلفن را وارد کنید");
+      return;
+    }
+    setPhoneBusy(true);
+    setError("");
+    try {
+      await requestPhone(value);
+      setNewPhone("");
+      await refreshMe();
+      reset("درخواست شما ثبت شد و در انتظار تأیید مدیر است");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setPhoneBusy(false);
+    }
+  }
+
+  async function handleCancelPhone() {
+    setPhoneBusy(true);
+    setError("");
+    try {
+      await cancelPhoneRequest();
+      await refreshMe();
+      reset("درخواست لغو شد");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setPhoneBusy(false);
+    }
+  }
+
+  async function handleRemovePhone() {
+    if (!window.confirm("شماره تلفن شما حذف شود؟")) return;
+    setPhoneBusy(true);
+    setError("");
+    try {
+      await removeMyPhone();
+      await refreshMe();
+      reset("شماره تلفن حذف شد");
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setPhoneBusy(false);
+    }
+  }
 
   function reset(msg) {
     setMessage(msg);
@@ -70,7 +133,7 @@ export default function Profile({ onLogout }) {
 
   async function handleChangeUsername() {
     if (!newUsername.trim()) {
-      setError("Please enter a new username");
+      setError("نام کاربری جدید را وارد کنید");
       return;
     }
 
@@ -80,7 +143,7 @@ export default function Profile({ onLogout }) {
       await api.put("/api/profile/username", {
         new_username: newUsername.trim(),
       });
-      alert("Username updated. Please sign in again.");
+      alert("نام کاربری تغییر کرد. لطفاً دوباره وارد شوید.");
       await logout();
       onLogout();
     } catch (err) {
@@ -92,7 +155,7 @@ export default function Profile({ onLogout }) {
 
   async function handleChangePassword() {
     if (!oldPassword || !newPassword) {
-      setError("Please fill both password fields");
+      setError("هر دو فیلد رمز عبور را پر کنید");
       return;
     }
 
@@ -125,7 +188,7 @@ export default function Profile({ onLogout }) {
         keys,
       });
 
-      alert("Password updated. Please sign in again.");
+      alert("رمز عبور تغییر کرد. لطفاً دوباره وارد شوید.");
       await logout();
       onLogout();
     } catch (err) {
@@ -141,7 +204,7 @@ export default function Profile({ onLogout }) {
     if (!file) return;
 
     if (file.size > 5 * 1024 * 1024) {
-      setError("Image is too large (max 5 MB)");
+      setError("تصویر خیلی بزرگ است (حداکثر ۵ مگابایت)");
       return;
     }
 
@@ -151,7 +214,7 @@ export default function Profile({ onLogout }) {
       await uploadAvatar(file);
       setHasAvatar(true);
       setAvatarRefresh((n) => n + 1);
-      reset("Profile photo updated");
+      reset("عکس پروفایل به‌روزرسانی شد");
     } catch (err) {
       setError(err.message);
     } finally {
@@ -166,7 +229,7 @@ export default function Profile({ onLogout }) {
       await deleteAvatar();
       setHasAvatar(false);
       setAvatarRefresh((n) => n + 1);
-      reset("Profile photo removed");
+      reset("عکس پروفایل حذف شد");
     } catch (err) {
       setError(err.message);
     } finally {
@@ -193,11 +256,11 @@ export default function Profile({ onLogout }) {
       if (pushOn) {
         await disablePush();
         setPushOn(false);
-        reset("Notifications turned off");
+        reset("اعلان‌ها خاموش شد");
       } else {
         await enablePush();
         setPushOn(true);
-        reset("Notifications turned on");
+        reset("اعلان‌ها روشن شد");
       }
     } catch (err) {
       setError(err.message);
@@ -208,13 +271,76 @@ export default function Profile({ onLogout }) {
 
   return (
     <div className="container stack">
-      <h2 style={{ margin: 0 }}>Profile</h2>
+      <h2 style={{ margin: 0 }}>پروفایل</h2>
 
       <Section title="نام کاربری">
         <div style={{ fontSize: 16, fontWeight: 500 }}>{username}</div>
       </Section>
 
-      <Section title="📷 Profile photo">
+      <Section title="📱 شماره تلفن">
+        {phone ? (
+          <div className="row" style={{ alignItems: "center", gap: 10 }}>
+            <div dir="ltr" style={{ flex: 1, fontSize: 16, fontWeight: 500 }}>
+              {phone}
+            </div>
+            {phoneVerified ? (
+              <span className="badge" title="تأیید شده توسط مدیر">
+                ✅ تأیید شده
+              </span>
+            ) : (
+              <span className="badge">در انتظار تأیید</span>
+            )}
+          </div>
+        ) : (
+          <div className="muted">هنوز شماره‌ای ثبت نکرده‌اید.</div>
+        )}
+
+        {pendingPhone ? (
+          <div className="stack" style={{ gap: 8 }}>
+            <div className="muted" style={{ lineHeight: 1.8 }}>
+              درخواست شما برای شماره <strong dir="ltr">{pendingPhone}</strong> ثبت
+              شده و در انتظار تأیید مدیر است.
+            </div>
+            <button
+              className="btn btn-secondary"
+              onClick={handleCancelPhone}
+              disabled={phoneBusy}
+            >
+              لغو درخواست
+            </button>
+          </div>
+        ) : (
+          <div className="stack" style={{ gap: 8 }}>
+            <input
+              className="field"
+              type="tel"
+              dir="ltr"
+              placeholder={phone ? "شماره جدید" : "مثلاً +989123456789"}
+              value={newPhone}
+              onChange={(e) => setNewPhone(e.target.value)}
+            />
+            <button className="btn" onClick={handleRequestPhone} disabled={phoneBusy}>
+              {phone ? "درخواست تغییر شماره" : "ثبت شماره تلفن"}
+            </button>
+            {phone && (
+              <button
+                className="btn btn-secondary"
+                onClick={handleRemovePhone}
+                disabled={phoneBusy}
+              >
+                حذف شماره
+              </button>
+            )}
+          </div>
+        )}
+
+        <div className="muted" style={{ fontSize: 12, lineHeight: 1.8 }}>
+          شماره تلفن پس از تأیید مدیر فعال می‌شود. فقط شماره‌های تأیید‌شده در
+          «افزودن مخاطب با شماره تلفن» پیدا می‌شوند.
+        </div>
+      </Section>
+
+      <Section title="📷 عکس پروفایل">
         <div className="row" style={{ alignItems: "center", gap: 14 }}>
           <Avatar key={avatarRefresh} userId={username} size={64} />
           <div className="stack" style={{ gap: 6, flex: 1 }}>
@@ -230,7 +356,7 @@ export default function Profile({ onLogout }) {
               onClick={() => fileInputRef.current?.click()}
               disabled={avatarBusy}
             >
-              {avatarBusy ? "…" : hasAvatar ? "Change photo" : "Upload photo"}
+              {avatarBusy ? "…" : hasAvatar ? "تغییر عکس" : "بارگذاری عکس"}
             </button>
             {hasAvatar && (
               <button
@@ -245,24 +371,24 @@ export default function Profile({ onLogout }) {
         </div>
 
         <div className="stack" style={{ gap: 4 }}>
-          <div className="muted" style={{ fontSize: 13 }}>Who can see it</div>
+          <div className="muted" style={{ fontSize: 13 }}>چه کسانی می‌توانند ببینند</div>
           <select
             className="field"
             value={avatarVisibility}
             onChange={handleVisibilityChange}
           >
-            <option value="public">Everyone</option>
-            <option value="contacts">My contacts only</option>
+            <option value="public">همه</option>
+            <option value="contacts">فقط مخاطبین من</option>
           </select>
           <div className="muted" style={{ fontSize: 12 }}>
             {avatarVisibility === "contacts"
               ? "Only people you have added as a contact, or who have added you, can see this photo — including in group chats."
-              : "Visible to any signed-in user."}
+              : "برای همه کاربران وارد‌شده قابل مشاهده است."}
           </div>
         </div>
       </Section>
 
-      <Section title="🔔 Notifications">
+      <Section title="🔔 اعلان‌ها">
         {support.supported ? (
           <>
             <button
@@ -273,8 +399,8 @@ export default function Profile({ onLogout }) {
               {pushBusy
                 ? "…"
                 : pushOn
-                ? "Turn off notifications"
-                : "Turn on notifications"}
+                ? "خاموش کردن اعلان‌ها"
+                : "روشن کردن اعلان‌ها"}
             </button>
 
             {permission() === "denied" && (
@@ -296,7 +422,7 @@ export default function Profile({ onLogout }) {
         )}
       </Section>
 
-      <Section title="🔒 Encryption">
+      <Section title="🔒 رمزنگاری">
         <div style={{ fontSize: 14 }}>
           {hasKey
             ? "Your encryption key is unlocked on this device. Secure chats will open normally."

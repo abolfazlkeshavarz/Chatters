@@ -8,10 +8,10 @@ export default function ConnectionBanner({ status }) {
 
   const label =
     status === "connecting"
-      ? "Connecting…"
+      ? "در حال اتصال…"
       : status === "reconnecting"
-      ? "Reconnecting…"
-      : "Offline — messages will sync when you reconnect";
+      ? "در حال اتصال مجدد…"
+      : "آفلاین — پیام‌ها پس از اتصال مجدد همگام می‌شوند";
 
   return (
     <div className="conn-banner" role="status">

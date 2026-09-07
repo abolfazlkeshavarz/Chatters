@@ -100,6 +100,8 @@ type adminMessage struct {
 	IsEncrypted bool       `json:"is_encrypted"`
 	HasFile     bool       `json:"has_file"`
 	Filename    *string    `json:"filename,omitempty"`
+	MimeType    *string    `json:"mime_type,omitempty"`
+	SizeBytes   *int64     `json:"size_bytes,omitempty"`
 	Status      string     `json:"status"`
 	CreatedAt   time.Time  `json:"created_at"`
 	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
@@ -126,7 +128,8 @@ func AdminGetChatMessages(c *gin.Context) {
 		`SELECT m.id,
 		        COALESCE(m.sender_id, CASE WHEN m.type = 'system' THEN '' ELSE '[deleted]' END),
 		        COALESCE(m.content, ''), m.type, m.is_encrypted,
-		        m.file_path IS NOT NULL, m.filename, m.status, m.created_at, m.expires_at
+		        m.file_path IS NOT NULL, m.filename, m.mime_type,
+		        m.status, m.created_at, m.expires_at
 		 FROM messages m
 		 WHERE m.chat_id = $1
 		 ORDER BY m.id DESC
@@ -142,18 +145,17 @@ func AdminGetChatMessages(c *gin.Context) {
 	out := []adminMessage{}
 	for rows.Next() {
 		var m adminMessage
-		var filename sql.NullString
+		var filename, mimeType sql.NullString
 		var expiresAt sql.NullTime
 		if err := rows.Scan(
 			&m.ID, &m.From, &m.Content, &m.Type, &m.IsEncrypted,
-			&m.HasFile, &filename, &m.Status, &m.CreatedAt, &expiresAt,
+			&m.HasFile, &filename, &mimeType, &m.Status, &m.CreatedAt, &expiresAt,
 		); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read messages"})
 			return
 		}
-		if filename.Valid {
-			m.Filename = &filename.String
-		}
+		m.Filename = nullStr(filename)
+		m.MimeType = nullStr(mimeType)
 		if expiresAt.Valid {
 			m.ExpiresAt = &expiresAt.Time
 		}

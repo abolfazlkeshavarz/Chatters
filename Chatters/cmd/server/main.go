@@ -183,6 +183,24 @@ func main() {
 		protected.POST("/media", handlers.UploadMedia)
 		protected.GET("/media/:id", handlers.DownloadMedia)
 
+		// Shared public file / media library.
+		protected.GET("/files", handlers.ListPublicFiles)
+		protected.POST("/files", handlers.UploadPublicFile)
+		protected.GET("/files/:id/download", handlers.DownloadPublicFile)
+		protected.POST("/files/:id/unlock", handlers.CheckPublicFilePassword)
+		protected.PUT("/files/:id", handlers.UpdatePublicFile)
+		protected.DELETE("/files/:id", handlers.DeletePublicFile)
+
+		// Phone number: the user asks, an administrator verifies.
+		protected.POST("/profile/phone", handlers.RequestPhone)
+		protected.GET("/profile/phone/request", handlers.MyPhoneRequest)
+		protected.DELETE("/profile/phone/request", handlers.CancelPhoneRequest)
+		protected.DELETE("/profile/phone", handlers.RemoveMyPhone)
+
+		// Admin notices pinned above the chat list.
+		protected.GET("/announcements", handlers.MyAnnouncements)
+		protected.POST("/announcements/:id/ack", handlers.AckAnnouncement)
+
 		protected.GET("/push/vapid-public-key", handlers.PushPublicKey)
 		protected.POST("/push/subscribe", handlers.Subscribe)
 		protected.POST("/push/unsubscribe", handlers.Unsubscribe)
@@ -206,6 +224,32 @@ func main() {
 			admin.GET("/chats/:id/messages", handlers.AdminGetChatMessages)
 			admin.DELETE("/chats/:id", handlers.AdminDeleteChat)
 			admin.DELETE("/messages/:id", handlers.AdminDeleteMessage)
+
+			// Attachments from any chat, without the membership check the
+			// user-facing endpoint enforces.
+			admin.GET("/media/:id", handlers.AdminGetMedia)
+
+			admin.GET("/users/:id/detail", handlers.AdminGetUser)
+			admin.PUT("/users/:id/phone", handlers.AdminSetUserPhone)
+
+			admin.GET("/registrations", handlers.AdminListRegistrations)
+			admin.POST("/registrations/:id/approve", handlers.AdminApproveRegistration)
+			admin.POST("/registrations/:id/reject", handlers.AdminRejectRegistration)
+			admin.DELETE("/registrations/:id", handlers.AdminDeleteRegistration)
+
+			admin.GET("/phone-requests", handlers.AdminListPhoneRequests)
+			admin.POST("/phone-requests/:id/approve", handlers.AdminApprovePhoneRequest)
+			admin.POST("/phone-requests/:id/reject", handlers.AdminRejectPhoneRequest)
+
+			admin.GET("/files", handlers.AdminListPublicFiles)
+
+			admin.GET("/announcements", handlers.AdminListAnnouncements)
+			admin.POST("/announcements", handlers.AdminCreateAnnouncement)
+			admin.PUT("/announcements/:id", handlers.AdminUpdateAnnouncement)
+			admin.DELETE("/announcements/:id", handlers.AdminDeleteAnnouncement)
+			admin.GET("/announcements/:id/readers", handlers.AdminAnnouncementReaders)
+
+			admin.GET("/audit", handlers.AdminAuditLog)
 		}
 	}
 

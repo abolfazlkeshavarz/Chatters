@@ -11,8 +11,35 @@ import {
   setRole,
 } from "../api/admin";
 import AdminChats from "./AdminChats";
+import AdminRegistrations from "./AdminRegistrations";
+import AdminPhones from "./AdminPhones";
+import AdminAnnouncements from "./AdminAnnouncements";
+import AdminFiles from "./AdminFiles";
+import AdminAudit from "./AdminAudit";
+import AdminUserDetail from "../components/AdminUserDetail";
 
 const PAGE_SIZE = 25;
+
+function formatBytes(n) {
+  if (!Number.isFinite(n) || n <= 0) return "0 B";
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let v = n;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
+}
+
+function formatWhen(ts) {
+  if (!ts) return "never";
+  try {
+    return new Date(ts).toLocaleDateString();
+  } catch {
+    return "—";
+  }
+}
 
 // value in seconds, matching what the API stores; 0 means "never".
 const RETENTION_PRESETS = [
@@ -277,7 +304,8 @@ export default function Admin() {
   const [notice, setNotice] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [resetting, setResetting] = useState(null);
-  const [tab, setTab] = useState("users"); // 'users' | 'chats'
+  const [tab, setTab] = useState("users");
+  const [detailUser, setDetailUser] = useState(null);
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -347,34 +375,65 @@ export default function Admin() {
         </div>
       </div>
 
-      <div className="row" style={{ gap: 8 }}>
-        <button
-          className={`btn ${tab === "users" ? "" : "btn-secondary"}`}
-          onClick={() => setTab("users")}
-        >
-          Overview & users
-        </button>
-        <button
-          className={`btn ${tab === "chats" ? "" : "btn-secondary"}`}
-          onClick={() => setTab("chats")}
-        >
-          Chats & messages
-        </button>
+      {/* Counts on the tabs, because a queue nobody notices is a queue nobody
+          works — the pending numbers are the reason to open the panel. */}
+      <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
+        {[
+          { id: "users", label: "Overview & users" },
+          { id: "registrations", label: "Registrations", badge: stats.pending_registrations },
+          { id: "phones", label: "Phone numbers", badge: stats.pending_phones },
+          { id: "chats", label: "Chats & messages" },
+          { id: "files", label: "Public library" },
+          { id: "announcements", label: "Announcements" },
+          { id: "audit", label: "Audit log" },
+        ].map((t) => (
+          <button
+            key={t.id}
+            className={`btn ${tab === t.id ? "" : "btn-secondary"}`}
+            style={{ fontSize: 13 }}
+            onClick={() => setTab(t.id)}
+          >
+            {t.label}
+            {t.badge > 0 && (
+              <span style={styles.tabBadge}>{t.badge}</span>
+            )}
+          </button>
+        ))}
       </div>
 
       {error && <div className="error-text">{error}</div>}
       {notice && <div style={styles.notice}>{notice}</div>}
 
+      {detailUser && (
+        <AdminUserDetail userId={detailUser} onClose={() => setDetailUser(null)} />
+      )}
+
       {tab === "chats" && <AdminChats onNotice={flash} onError={setError} />}
+      {tab === "registrations" && (
+        <AdminRegistrations onNotice={flash} onError={setError} />
+      )}
+      {tab === "phones" && <AdminPhones onNotice={flash} onError={setError} />}
+      {tab === "files" && <AdminFiles onNotice={flash} onError={setError} />}
+      {tab === "announcements" && (
+        <AdminAnnouncements onNotice={flash} onError={setError} />
+      )}
+      {tab === "audit" && <AdminAudit onError={setError} />}
 
       {tab === "users" && (
       <>
       <div style={styles.statGrid}>
         <StatCard label="Users" value={stats.users} />
+        <StatCard label="Administrators" value={stats.admins} />
         <StatCard label="Chats" value={stats.chats} />
+        <StatCard label="Secret chats" value={stats.secret_chats} />
         <StatCard label="Messages" value={stats.messages} />
-        <StatCard label="Secure chats" value={stats.e2e_chats} />
+        <StatCard label="Attachments" value={stats.media_messages} />
         <StatCard label="Encrypted messages" value={stats.encrypted_messages} />
+        <StatCard label="Public files" value={stats.public_files} />
+        <StatCard label="Private files" value={stats.private_files} />
+        <StatCard label="Library size" value={formatBytes(stats.library_bytes)} />
+        <StatCard label="Active notices" value={stats.active_announcements} />
+        <StatCard label="Pending signups" value={stats.pending_registrations} />
       </div>
 
       <div style={styles.note}>
@@ -388,7 +447,7 @@ export default function Admin() {
         <input
           className="field"
           style={{ flex: 1, minWidth: 200 }}
-          placeholder="Search by username or email"
+          placeholder="Search by username, email or phone"
           value={search}
           onChange={(e) => {
             setPage(0);
@@ -407,7 +466,10 @@ export default function Admin() {
               <tr>
                 <th>User</th>
                 <th>Email</th>
+                <th>Phone</th>
                 <th className="hide-sm">Chats</th>
+                <th className="hide-sm">Msgs</th>
+                <th className="hide-sm">Last seen</th>
                 <th className="hide-sm">Key</th>
                 <th>Role</th>
                 <th>Actions</th>
@@ -416,7 +478,7 @@ export default function Admin() {
             <tbody>
               {loading && (
                 <tr>
-                  <td colSpan={6} style={styles.centerCell}>
+                  <td colSpan={9} style={styles.centerCell}>
                     Loading…
                   </td>
                 </tr>
@@ -424,7 +486,7 @@ export default function Admin() {
 
               {!loading && users.length === 0 && (
                 <tr>
-                  <td colSpan={6} style={styles.centerCell}>
+                  <td colSpan={9} style={styles.centerCell}>
                     No users found
                   </td>
                 </tr>
@@ -434,11 +496,38 @@ export default function Admin() {
                 users.map((u) => (
                   <tr key={u.id}>
                     <td>
-                      <strong>{u.id}</strong>
+                      <button
+                        style={styles.userLink}
+                        onClick={() => setDetailUser(u.id)}
+                        title="View full details"
+                      >
+                        {u.avatar_visibility === "contacts" && (
+                          <span title="Photo is contacts-only">🔒 </span>
+                        )}
+                        <strong>{u.id}</strong>
+                      </button>
                       {u.id === me && <span className="badge"> you</span>}
                     </td>
-                    <td>{u.email}</td>
+                    <td dir="ltr">{u.email}</td>
+                    <td dir="ltr">
+                      {u.phone ? (
+                        <>
+                          {u.phone}{" "}
+                          {u.phone_verified ? (
+                            <span title="verified">✅</span>
+                          ) : (
+                            <span title="not verified">⏳</span>
+                          )}
+                        </>
+                      ) : (
+                        <span className="muted">—</span>
+                      )}
+                    </td>
                     <td className="hide-sm">{u.chat_count}</td>
+                    <td className="hide-sm">{u.message_count}</td>
+                    <td className="hide-sm muted" style={{ fontSize: 12 }}>
+                      {formatWhen(u.last_seen_at)}
+                    </td>
                     <td className="hide-sm">
                       {u.has_keys ? (
                         <span className="badge badge-secure">yes</span>
@@ -455,6 +544,13 @@ export default function Admin() {
                     </td>
                     <td>
                       <div className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
+                        <button
+                          className="btn btn-secondary"
+                          style={styles.smallBtn}
+                          onClick={() => setDetailUser(u.id)}
+                        >
+                          Details
+                        </button>
                         <button
                           className="btn btn-secondary"
                           style={styles.smallBtn}
@@ -537,6 +633,27 @@ const styles = {
   },
   stat: { textAlign: "center" },
   statValue: { fontSize: 26, fontWeight: 600 },
+  tabBadge: {
+    display: "inline-block",
+    marginInlineStart: 6,
+    minWidth: 18,
+    padding: "1px 6px",
+    borderRadius: 9,
+    background: "#dc2626",
+    color: "#fff",
+    fontSize: 11,
+    fontWeight: 700,
+    lineHeight: "16px",
+  },
+  userLink: {
+    background: "none",
+    border: "none",
+    padding: 0,
+    color: "inherit",
+    cursor: "pointer",
+    textDecoration: "underline",
+    font: "inherit",
+  },
   note: {
     background: "var(--unread-bg)",
     borderRadius: 12,

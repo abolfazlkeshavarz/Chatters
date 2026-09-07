@@ -3,6 +3,7 @@ package handlers
 import (
 	"database/sql"
 	"net/http"
+	"strings"
 
 	"messenger/internal/auth"
 	"messenger/internal/db"
@@ -31,11 +32,19 @@ func (k KeyBundle) complete() bool {
 	return k.PublicKey != "" && k.EncryptedPrivateKey != "" && k.KeySalt != "" && k.KeyNonce != ""
 }
 
+// Register files a signup request rather than creating the account.
+//
+// Nothing is usable until an administrator approves it from the panel, so this
+// endpoint never issues a token and the caller cannot log in afterwards. The
+// key bundle the browser generated is carried through verbatim and installed
+// on the account at approval time, which is what lets the user's original
+// password still unwrap their private key once they are let in.
 func Register(c *gin.Context) {
 	var req struct {
-		Username string `json:"username"`
-		Email    string `json:"email"`
-		Password string `json:"password"`
+		Username string     `json:"username"`
+		Email    string     `json:"email"`
+		Phone    string     `json:"phone"`
+		Password string     `json:"password"`
 		Keys     *KeyBundle `json:"keys"`
 	}
 
@@ -56,8 +65,36 @@ func Register(c *gin.Context) {
 		return
 	}
 
+	// Optional at signup: an account with no number is approved without one and
+	// can request it later from the profile page.
+	var phone sql.NullString
+	if strings.TrimSpace(req.Phone) != "" {
+		normalised, err := validate.Phone(req.Phone)
+		if err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+			return
+		}
+		phone = sql.NullString{String: normalised, Valid: true}
+	}
+
 	if err := validate.Password(req.Password); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	// Checked up front rather than left to a constraint: these clash with the
+	// users table, not with another pending request, so there is no unique
+	// index that would catch them and the applicant deserves to know now
+	// instead of after waiting for a review that can only be rejected.
+	var taken bool
+	if err := db.DB.QueryRow(
+		`SELECT EXISTS (SELECT 1 FROM users WHERE id = $1 OR email = $2)`, username, email,
+	).Scan(&taken); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to check availability"})
+		return
+	}
+	if taken {
+		c.JSON(http.StatusConflict, gin.H{"error": "that username or email is already registered"})
 		return
 	}
 
@@ -72,31 +109,31 @@ func Register(c *gin.Context) {
 		keys = *req.Keys
 	}
 
-	// Let the unique constraints decide instead of pre-checking: a check
-	// followed by an insert races two concurrent signups for the same name.
 	_, err = db.DB.Exec(
-		`INSERT INTO users (id, email, password_hash, public_key, encrypted_private_key, key_salt, key_nonce)
-		 VALUES ($1, $2, $3, NULLIF($4,''), NULLIF($5,''), NULLIF($6,''), NULLIF($7,''))`,
-		username, email, string(hash),
+		`INSERT INTO registration_requests
+		   (username, email, phone, password_hash,
+		    public_key, encrypted_private_key, key_salt, key_nonce)
+		 VALUES ($1, $2, $3, $4, NULLIF($5,''), NULLIF($6,''), NULLIF($7,''), NULLIF($8,''))`,
+		username, email, phone, string(hash),
 		keys.PublicKey, keys.EncryptedPrivateKey, keys.KeySalt, keys.KeyNonce,
 	)
-
 	if err != nil {
-		if isUniqueViolation(err, "users_pkey") {
+		if isUniqueViolation(err, "idx_regreq_pending_username") ||
+			isUniqueViolation(err, "idx_regreq_pending_email") {
 			c.JSON(http.StatusConflict, gin.H{
-				"error": "username already taken, please choose another (add letters or numbers)",
+				"error": "a request with that username or email is already waiting for review",
 			})
 			return
 		}
-		if isUniqueViolation(err, "users_email_key") {
-			c.JSON(http.StatusConflict, gin.H{"error": "email already registered"})
-			return
-		}
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create user"})
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to submit request"})
 		return
 	}
 
-	c.JSON(http.StatusOK, gin.H{"status": "ok", "username": username})
+	c.JSON(http.StatusOK, gin.H{
+		"status":   "pending",
+		"username": username,
+		"message":  "your request was submitted and is waiting for an administrator to approve it",
+	})
 }
 
 func Login(c *gin.Context) {
@@ -148,6 +185,10 @@ func Login(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue token"})
 		return
 	}
+
+	// Best-effort: the panel's "last seen" column is informational, and a
+	// failed write here must not cost the user their sign-in.
+	_, _ = db.DB.Exec(`UPDATE users SET last_seen_at = now() WHERE id = $1`, userID)
 
 	keys = KeyBundle{
 		PublicKey:           pubKey.String,
