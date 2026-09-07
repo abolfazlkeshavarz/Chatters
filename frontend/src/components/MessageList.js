@@ -34,7 +34,7 @@ function SelfDestructBadge({ expiresAt, now }) {
       : secs < 86400
       ? `${Math.ceil(secs / 3600)}h`
       : `${Math.ceil(secs / 86400)}d`;
-  return <span title="مدتی پس از ارسال حذف می‌شود"> · 🔥 {label}</span>;
+  return <span title="حذف خودکار پس از ارسال"> · 🔥 {label}</span>;
 }
 
 /** image | video | file — from the mime type, with a filename-extension fallback. */

@@ -373,6 +373,72 @@ var migrations = []string{
 
 	// --- Last-seen tracking, for the panel's user detail view ---
 	`ALTER TABLE users ADD COLUMN IF NOT EXISTS last_seen_at TIMESTAMPTZ`,
+
+	// --- Soft deletion, so an administrator can still reach what users removed ---
+	//
+	// "Delete for everyone" used to DELETE the row. It now stamps deleted_at
+	// instead: every user-facing query filters on it, so nothing changes for
+	// the people in the conversation, while the moderation panel can still
+	// produce the message or chat afterwards. Attachments are kept on disk for
+	// the same reason — deleting the file would leave the admin a row naming
+	// evidence that no longer exists.
+	//
+	// This is a real privacy trade: "delete for everyone" now means "hidden
+	// from everyone but the operator", which is why the client wording says so.
+	// AdminDeleteChat / AdminDeleteMessage remain hard deletes — that is the
+	// path that genuinely destroys data, and it is the operator's to choose.
+	`ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`,
+	`ALTER TABLE messages ADD COLUMN IF NOT EXISTS deleted_by TEXT REFERENCES users(id) ON DELETE SET NULL ON UPDATE CASCADE`,
+	`CREATE INDEX IF NOT EXISTS idx_messages_deleted_at ON messages(deleted_at) WHERE deleted_at IS NOT NULL`,
+
+	`ALTER TABLE chats ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ`,
+	`ALTER TABLE chats ADD COLUMN IF NOT EXISTS deleted_by TEXT REFERENCES users(id) ON DELETE SET NULL ON UPDATE CASCADE`,
+	`CREATE INDEX IF NOT EXISTS idx_chats_deleted_at ON chats(deleted_at) WHERE deleted_at IS NOT NULL`,
+
+	// Members are removed from chat_members when they leave, which would erase
+	// who was in a deleted conversation. Snapshot them so the panel can still
+	// say who the participants were.
+	`CREATE TABLE IF NOT EXISTS chat_member_history (
+		chat_id  UUID NOT NULL REFERENCES chats(id) ON DELETE CASCADE,
+		user_id  TEXT NOT NULL,
+		left_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+		PRIMARY KEY (chat_id, user_id)
+	)`,
+
+	// --- One direct chat per pair ---
+	// Two people were able to accumulate unlimited 1:1 conversations by both
+	// pressing "new chat", which split their history across duplicates. A
+	// partial unique index on the ordered member pair is what makes that
+	// impossible rather than merely unlikely: the handler also looks first, but
+	// two simultaneous requests would both find nothing and both insert.
+	//
+	// Secret chats are excluded — a separate encrypted conversation alongside
+	// the normal one is the entire point of them — as are group and
+	// soft-deleted rows.
+	`CREATE TABLE IF NOT EXISTS direct_chat_pairs (
+		chat_id UUID PRIMARY KEY REFERENCES chats(id) ON DELETE CASCADE,
+		user_a  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+		user_b  TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+		CHECK (user_a < user_b)
+	)`,
+	`CREATE UNIQUE INDEX IF NOT EXISTS idx_direct_chat_pair ON direct_chat_pairs(user_a, user_b)`,
+
+	// Back-fill from the chats that already exist, keeping the oldest of any
+	// duplicate set — the one most likely to hold the real history. Later
+	// duplicates are left alone rather than merged: silently moving somebody's
+	// messages between conversations is not a migration's decision to make.
+	`INSERT INTO direct_chat_pairs (chat_id, user_a, user_b)
+	 SELECT DISTINCT ON (LEAST(m1.user_id, m2.user_id), GREATEST(m1.user_id, m2.user_id))
+	        c.id,
+	        LEAST(m1.user_id, m2.user_id),
+	        GREATEST(m1.user_id, m2.user_id)
+	 FROM chats c
+	 JOIN chat_members m1 ON m1.chat_id = c.id
+	 JOIN chat_members m2 ON m2.chat_id = c.id AND m2.user_id > m1.user_id
+	 WHERE NOT c.is_group AND NOT c.is_secret AND c.deleted_at IS NULL
+	   AND (SELECT COUNT(*) FROM chat_members x WHERE x.chat_id = c.id) = 2
+	 ORDER BY LEAST(m1.user_id, m2.user_id), GREATEST(m1.user_id, m2.user_id), c.created_at
+	 ON CONFLICT DO NOTHING`,
 }
 
 // renameCascades repoints foreign keys at users(id) so that renaming a user

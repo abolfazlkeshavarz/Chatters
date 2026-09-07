@@ -12,6 +12,7 @@ import Avatar from "../components/Avatar";
 import AnnouncementBanner from "../components/AnnouncementBanner";
 import Chat from "./Chat";
 import SecureChat from "./SecureChat";
+import Modal from "../components/Modal";
 
 function formatTime(timestamp) {
   if (!timestamp) return "";
@@ -51,23 +52,21 @@ function ComposeMenu({ onClose, onPick }) {
   ];
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" style={{ maxWidth: 300 }} onClick={(e) => e.stopPropagation()}>
-        <div className="stack" style={{ padding: 8 }}>
-          {options.map((opt) => (
-            <button
-              key={opt.key}
-              className="btn btn-secondary"
-              style={{ justifyContent: "flex-start", textAlign: "start" }}
-              onClick={() => onPick(opt.key)}
-            >
-              <span style={{ marginInlineEnd: 10 }}>{opt.icon}</span>
-              {opt.label}
-            </button>
-          ))}
-        </div>
-      </div>
+    <Modal onClose={onClose} maxWidth={300}>
+    <div className="stack" style={{ padding: 8 }}>
+      {options.map((opt) => (
+        <button
+          key={opt.key}
+          className="btn btn-secondary"
+          style={{ justifyContent: "flex-start", textAlign: "start" }}
+          onClick={() => onPick(opt.key)}
+        >
+          <span style={{ marginInlineEnd: 10 }}>{opt.icon}</span>
+          {opt.label}
+        </button>
+      ))}
     </div>
+    </Modal>
   );
 }
 
@@ -118,88 +117,86 @@ function AddContactModal({ onClose, onAdded, contacts, onRemove }) {
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div style={{ padding: 20 }} className="stack">
-          <h3 style={{ margin: 0 }}>مخاطبین</h3>
+    <Modal onClose={onClose}>
+    <div style={{ padding: 20 }} className="stack">
+      <h3 style={{ margin: 0 }}>مخاطبین</h3>
 
-          <div className="row" style={{ gap: 6 }}>
-            {[
-              { id: "username", label: "با نام کاربری" },
-              { id: "phone", label: "با شماره تلفن" },
-            ].map((m) => (
-              <button
-                key={m.id}
-                className={mode === m.id ? "btn" : "btn btn-secondary"}
-                style={{ flex: 1, fontSize: 13 }}
-                onClick={() => {
-                  setMode(m.id);
-                  setError("");
-                  setNotice("");
-                }}
-              >
-                {m.label}
-              </button>
-            ))}
-          </div>
+      <div className="row" style={{ gap: 6 }}>
+        {[
+          { id: "username", label: "با نام کاربری" },
+          { id: "phone", label: "با شماره تلفن" },
+        ].map((m) => (
+          <button
+            key={m.id}
+            className={mode === m.id ? "btn" : "btn btn-secondary"}
+            style={{ flex: 1, fontSize: 13 }}
+            onClick={() => {
+              setMode(m.id);
+              setError("");
+              setNotice("");
+            }}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
 
-          <div className="row">
-            <input
-              className="field"
-              style={{ flex: 1 }}
-              dir={byPhone ? "ltr" : undefined}
-              type={byPhone ? "tel" : "text"}
-              placeholder={byPhone ? "+98…" : "نام کاربری"}
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && submit()}
-            />
-            <button className="btn" onClick={submit} disabled={busy}>
-              {busy ? "…" : "افزودن"}
-            </button>
-          </div>
+      <div className="row">
+        <input
+          className="field"
+          style={{ flex: 1 }}
+          dir={byPhone ? "ltr" : undefined}
+          type={byPhone ? "tel" : "text"}
+          placeholder={byPhone ? "+98…" : "نام کاربری"}
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+        />
+        <button className="btn" onClick={submit} disabled={busy}>
+          {busy ? "…" : "افزودن"}
+        </button>
+      </div>
 
-          {byPhone && (
-            <div className="muted" style={{ fontSize: 12, lineHeight: 1.7 }}>
-              فقط شماره‌هایی پیدا می‌شوند که توسط مدیر تأیید شده باشند.
-            </div>
-          )}
-
-          {error && <div className="error-text">{error}</div>}
-          {notice && <div className="muted">{notice}</div>}
-
-          <div className="scroll-area" style={{ maxHeight: 320 }}>
-            {contacts.length === 0 && (
-              <div className="muted" style={{ padding: "12px 0" }}>
-                هنوز مخاطبی ندارید.
-              </div>
-            )}
-            {contacts.map((ct) => (
-              <ContactRow
-                key={ct.id}
-                contact={ct}
-                right={
-                  <button
-                    className="btn btn-secondary"
-                    style={styles.smallBtn}
-                    onClick={() => onRemove(ct.id)}
-                    title="حذف"
-                  >
-                    ✕
-                  </button>
-                }
-              />
-            ))}
-          </div>
-
-          <div className="row" style={{ justifyContent: "flex-end" }}>
-            <button className="btn btn-secondary" onClick={onClose}>
-              پایان
-            </button>
-          </div>
+      {byPhone && (
+        <div className="muted" style={{ fontSize: 12, lineHeight: 1.7 }}>
+          فقط شماره‌هایی پیدا می‌شوند که توسط مدیر تأیید شده باشند.
         </div>
+      )}
+
+      {error && <div className="error-text">{error}</div>}
+      {notice && <div className="muted">{notice}</div>}
+
+      <div className="scroll-area" style={{ maxHeight: 320 }}>
+        {contacts.length === 0 && (
+          <div className="muted" style={{ padding: "12px 0" }}>
+            هنوز مخاطبی ندارید.
+          </div>
+        )}
+        {contacts.map((ct) => (
+          <ContactRow
+            key={ct.id}
+            contact={ct}
+            right={
+              <button
+                className="btn btn-secondary"
+                style={styles.smallBtn}
+                onClick={() => onRemove(ct.id)}
+                title="حذف"
+              >
+                ✕
+              </button>
+            }
+          />
+        ))}
+      </div>
+
+      <div className="row" style={{ justifyContent: "flex-end" }}>
+        <button className="btn btn-secondary" onClick={onClose}>
+          پایان
+        </button>
       </div>
     </div>
+    </Modal>
   );
 }
 
@@ -236,81 +233,79 @@ function PickContactsModal({ mode, contacts, onClose, onCreate, onOpenContacts }
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div style={{ padding: 20 }} className="stack">
-          <h3 style={{ margin: 0 }}>
-            {isGroup
-              ? "گروه جدید"
-              : isSecret
-              ? "🔒 گفتگوی محرمانه جدید"
-              : "گفتگوی جدید"}
-          </h3>
+    <Modal onClose={onClose}>
+    <div style={{ padding: 20 }} className="stack">
+      <h3 style={{ margin: 0 }}>
+        {isGroup
+          ? "گروه جدید"
+          : isSecret
+          ? "🔒 گفتگوی محرمانه جدید"
+          : "گفتگوی جدید"}
+      </h3>
 
-          {isGroup && (
-            <input
-              className="field"
-              placeholder="نام گروه (اختیاری)"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-            />
-          )}
+      {isGroup && (
+        <input
+          className="field"
+          placeholder="نام گروه (اختیاری)"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+      )}
 
-          {contacts.length === 0 ? (
-            <div className="stack" style={{ alignItems: "center", padding: "16px 0" }}>
-              <div className="muted">هنوز مخاطبی ندارید.</div>
-              <button className="btn" onClick={onOpenContacts}>
-                👤 Add a contact
-              </button>
-            </div>
-          ) : (
-            <div className="scroll-area" style={{ maxHeight: 320 }}>
-              {contacts.map((ct) => {
-                const isSelected = selected.includes(ct.id);
-                return (
-                  <button
-                    key={ct.id}
-                    className="list-row"
-                    onClick={() => toggle(ct.id)}
-                    disabled={busy}
-                    style={{
-                      ...styles.contactPickRow,
-                      background: isSelected ? "var(--unread-bg)" : "transparent",
-                    }}
-                  >
-                    <ContactRow
-                      contact={ct}
-                      right={
-                        isGroup ? (
-                          <span style={{ fontSize: 18 }}>{isSelected ? "☑️" : "⬜"}</span>
-                        ) : null
-                      }
-                    />
-                  </button>
-                );
-              })}
-            </div>
-          )}
-
-          {error && <div className="error-text">{error}</div>}
-
-          <div className="row" style={{ justifyContent: "flex-end" }}>
-            <button className="btn btn-secondary" onClick={onClose}>
-              Cancel
-            </button>
-            {isGroup && (
-              <button
-                className="btn"
-                onClick={() => create(selected)}
-                disabled={busy || selected.length === 0}
-              >
-                {busy ? "در حال ساخت…" : `Create (${selected.length})`}
-              </button>
-            )}
-          </div>
+      {contacts.length === 0 ? (
+        <div className="stack" style={{ alignItems: "center", padding: "16px 0" }}>
+          <div className="muted">هنوز مخاطبی ندارید.</div>
+          <button className="btn" onClick={onOpenContacts}>
+            👤 Add a contact
+          </button>
         </div>
+      ) : (
+        <div className="scroll-area" style={{ maxHeight: 320 }}>
+          {contacts.map((ct) => {
+            const isSelected = selected.includes(ct.id);
+            return (
+              <button
+                key={ct.id}
+                className="list-row"
+                onClick={() => toggle(ct.id)}
+                disabled={busy}
+                style={{
+                  ...styles.contactPickRow,
+                  background: isSelected ? "var(--unread-bg)" : "transparent",
+                }}
+              >
+                <ContactRow
+                  contact={ct}
+                  right={
+                    isGroup ? (
+                      <span style={{ fontSize: 18 }}>{isSelected ? "☑️" : "⬜"}</span>
+                    ) : null
+                  }
+                />
+              </button>
+            );
+          })}
+        </div>
+      )}
+
+      {error && <div className="error-text">{error}</div>}
+
+      <div className="row" style={{ justifyContent: "flex-end" }}>
+        <button className="btn btn-secondary" onClick={onClose}>
+          Cancel
+        </button>
+        {isGroup && (
+          <button
+            className="btn"
+            onClick={() => create(selected)}
+            disabled={busy || selected.length === 0}
+          >
+            {busy ? "در حال ساخت…" : `Create (${selected.length})`}
+          </button>
+        )}
       </div>
     </div>
+    </Modal>
   );
 }
 
@@ -462,7 +457,8 @@ export default function ChatList({ initialChatId }) {
     e?.stopPropagation();
     const label =
       scope === "everyone"
-        ? "این گفتگوی محرمانه برای هر دو نفر حذف شود؟ این کار قابل بازگشت نیست."
+        ? "این گفتگوی محرمانه برای هر دو نفر حذف شود؟\n\n" +
+          "از فهرست هر دو نفر پاک می‌شود، اما برای بررسی‌های مدیریتی روی سرور نگه داشته می‌شود."
         : chat.is_group
         ? "از این گروه خارج می‌شوید؟"
         : "این گفتگو از فهرست شما حذف شود؟ نسخه طرف مقابل باقی می‌ماند.";
@@ -645,10 +641,18 @@ export default function ChatList({ initialChatId }) {
                       <span title={chat.is_secret ? "گفتگوی محرمانه" : "رمزنگاری سرتاسری"}>🔒 </span>
                     )}
                     {title}
-                    {chat.is_secret && <span className="badge badge-secure"> secret</span>}
-                    {chat.is_group && <span className="badge"> group</span>}
+                    {chat.is_secret && (
+                      <span className="badge badge-secure" title="گفتگوی محرمانه">
+                        {" "}🔐
+                      </span>
+                    )}
+                    {chat.is_group && (
+                      <span className="badge" title="گروه">
+                        {" "}👥
+                      </span>
+                    )}
                     {chat.self_destruct_seconds > 0 && (
-                      <span title="زمان‌سنج خودتخریبی فعال است" style={{ opacity: 0.7 }}> 🔥</span>
+                      <span title="حذف خودکار پیام‌ها فعال است" style={{ opacity: 0.7 }}> 🔥</span>
                     )}
                     {chat.muted && <span title="بی‌صدا" style={{ opacity: 0.5 }}> 🔕</span>}
                   </div>

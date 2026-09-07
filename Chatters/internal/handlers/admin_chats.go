@@ -26,6 +26,12 @@ type adminChat struct {
 	MessageCount        int        `json:"message_count"`
 	CreatedAt           time.Time  `json:"created_at"`
 	LastActivity        *time.Time `json:"last_activity,omitempty"`
+
+	// A chat a user deleted "for everyone" is retained for moderation rather
+	// than destroyed, so the panel has to be able to tell the two apart.
+	DeletedAt   *time.Time `json:"deleted_at,omitempty"`
+	DeletedBy   *string    `json:"deleted_by,omitempty"`
+	DeletedMsgs int        `json:"deleted_message_count"`
 }
 
 // AdminListChats returns every chat in the system, newest activity first,
@@ -42,21 +48,43 @@ func AdminListChats(c *gin.Context) {
 		offset = v
 	}
 
+	// "all" by default: a moderator opening this list wants to see everything
+	// that exists, including what users removed — that retention is the reason
+	// the rows are still here.
+	state := c.DefaultQuery("state", "all")
+	if state != "all" && state != "live" && state != "deleted" {
+		state = "all"
+	}
+
+	// A LEFT JOIN plus the member snapshot, not an inner JOIN on chat_members:
+	// deleting a chat for everyone clears its membership rows, so an inner join
+	// would hide from the panel exactly the conversations it is retained for.
 	rows, err := db.DB.Query(
 		`SELECT c.id, c.is_group, c.is_secret, c.e2e_enabled, c.e2e_status,
 		        c.self_destruct_seconds, c.name, c.created_at,
-		        ARRAY_AGG(DISTINCT cm.user_id) AS members,
+		        c.deleted_at, c.deleted_by,
+		        COALESCE(
+		          ARRAY_AGG(DISTINCT cm.user_id) FILTER (WHERE cm.user_id IS NOT NULL),
+		          ARRAY(SELECT h.user_id FROM chat_member_history h WHERE h.chat_id = c.id),
+		          '{}'
+		        ) AS members,
 		        (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id) AS message_count,
+		        (SELECT COUNT(*) FROM messages m
+		          WHERE m.chat_id = c.id AND m.deleted_at IS NOT NULL) AS deleted_message_count,
 		        (SELECT MAX(m.created_at) FROM messages m WHERE m.chat_id = c.id) AS last_activity
 		 FROM chats c
-		 JOIN chat_members cm ON cm.chat_id = c.id
-		 WHERE c.id::text ILIKE $1
-		    OR COALESCE(c.name, '') ILIKE $1
-		    OR EXISTS (SELECT 1 FROM chat_members x WHERE x.chat_id = c.id AND x.user_id ILIKE $1)
+		 LEFT JOIN chat_members cm ON cm.chat_id = c.id
+		 WHERE ($4 = 'all'
+		        OR ($4 = 'deleted' AND c.deleted_at IS NOT NULL)
+		        OR ($4 = 'live' AND c.deleted_at IS NULL))
+		   AND (c.id::text ILIKE $1
+		        OR COALESCE(c.name, '') ILIKE $1
+		        OR EXISTS (SELECT 1 FROM chat_members x WHERE x.chat_id = c.id AND x.user_id ILIKE $1)
+		        OR EXISTS (SELECT 1 FROM chat_member_history h WHERE h.chat_id = c.id AND h.user_id ILIKE $1))
 		 GROUP BY c.id
 		 ORDER BY last_activity DESC NULLS LAST, c.created_at DESC
 		 LIMIT $2 OFFSET $3`,
-		search, limit, offset,
+		search, limit, offset, state,
 	)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to list chats"})
@@ -67,12 +95,13 @@ func AdminListChats(c *gin.Context) {
 	chats := []adminChat{}
 	for rows.Next() {
 		var ch adminChat
-		var name sql.NullString
-		var lastActivity sql.NullTime
+		var name, deletedBy sql.NullString
+		var lastActivity, deletedAt sql.NullTime
 		if err := rows.Scan(
 			&ch.ID, &ch.IsGroup, &ch.IsSecret, &ch.E2EEnabled, &ch.E2EStatus,
 			&ch.SelfDestructSeconds, &name, &ch.CreatedAt,
-			pq.Array(&ch.Members), &ch.MessageCount, &lastActivity,
+			&deletedAt, &deletedBy,
+			pq.Array(&ch.Members), &ch.MessageCount, &ch.DeletedMsgs, &lastActivity,
 		); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read chats"})
 			return
@@ -83,13 +112,18 @@ func AdminListChats(c *gin.Context) {
 		if lastActivity.Valid {
 			ch.LastActivity = &lastActivity.Time
 		}
+		if deletedAt.Valid {
+			ch.DeletedAt = &deletedAt.Time
+		}
+		ch.DeletedBy = nullStr(deletedBy)
 		chats = append(chats, ch)
 	}
 
-	var total int
+	var total, deleted int
 	_ = db.DB.QueryRow(`SELECT COUNT(*) FROM chats`).Scan(&total)
+	_ = db.DB.QueryRow(`SELECT COUNT(*) FROM chats WHERE deleted_at IS NOT NULL`).Scan(&deleted)
 
-	c.JSON(http.StatusOK, gin.H{"chats": chats, "total": total})
+	c.JSON(http.StatusOK, gin.H{"chats": chats, "total": total, "deleted": deleted})
 }
 
 type adminMessage struct {
@@ -105,6 +139,8 @@ type adminMessage struct {
 	Status      string     `json:"status"`
 	CreatedAt   time.Time  `json:"created_at"`
 	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+	DeletedAt   *time.Time `json:"deleted_at,omitempty"`
+	DeletedBy   *string    `json:"deleted_by,omitempty"`
 }
 
 // AdminGetChatMessages returns a chat's full transcript for the moderator
@@ -129,7 +165,7 @@ func AdminGetChatMessages(c *gin.Context) {
 		        COALESCE(m.sender_id, CASE WHEN m.type = 'system' THEN '' ELSE '[deleted]' END),
 		        COALESCE(m.content, ''), m.type, m.is_encrypted,
 		        m.file_path IS NOT NULL, m.filename, m.mime_type,
-		        m.status, m.created_at, m.expires_at
+		        m.status, m.created_at, m.expires_at, m.deleted_at, m.deleted_by
 		 FROM messages m
 		 WHERE m.chat_id = $1
 		 ORDER BY m.id DESC
@@ -145,19 +181,24 @@ func AdminGetChatMessages(c *gin.Context) {
 	out := []adminMessage{}
 	for rows.Next() {
 		var m adminMessage
-		var filename, mimeType sql.NullString
-		var expiresAt sql.NullTime
+		var filename, mimeType, deletedBy sql.NullString
+		var expiresAt, deletedAt sql.NullTime
 		if err := rows.Scan(
 			&m.ID, &m.From, &m.Content, &m.Type, &m.IsEncrypted,
 			&m.HasFile, &filename, &mimeType, &m.Status, &m.CreatedAt, &expiresAt,
+			&deletedAt, &deletedBy,
 		); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read messages"})
 			return
 		}
 		m.Filename = nullStr(filename)
 		m.MimeType = nullStr(mimeType)
+		m.DeletedBy = nullStr(deletedBy)
 		if expiresAt.Valid {
 			m.ExpiresAt = &expiresAt.Time
+		}
+		if deletedAt.Valid {
+			m.DeletedAt = &deletedAt.Time
 		}
 		out = append(out, m)
 	}

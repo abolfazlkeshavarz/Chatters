@@ -29,6 +29,7 @@ func DownloadMedia(c *gin.Context) {
 		 FROM messages m
 		 WHERE m.id = $1
 		   AND m.type = 'media'
+		   AND m.deleted_at IS NULL
 		   AND m.file_path IS NOT NULL
 		   AND EXISTS (
 		     SELECT 1 FROM chat_members cm

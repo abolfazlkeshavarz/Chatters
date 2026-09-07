@@ -7,6 +7,7 @@ import {
   fetchAdminMediaURL,
 } from "../api/admin";
 import ImageModal from "../components/ImageModal";
+import Modal from "../components/Modal";
 
 const PAGE_SIZE = 30;
 
@@ -161,6 +162,8 @@ export default function AdminChats({ onNotice, onError }) {
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(true);
 
+  const [state, setState] = useState("all");
+  const [deletedCount, setDeletedCount] = useState(0);
   const [openChat, setOpenChat] = useState(null);
   const [messages, setMessages] = useState([]);
   const [msgLoading, setMsgLoading] = useState(false);
@@ -170,17 +173,19 @@ export default function AdminChats({ onNotice, onError }) {
     try {
       const data = await listChats({
         search,
+        state,
         limit: PAGE_SIZE,
         offset: page * PAGE_SIZE,
       });
       setChats(data.chats || []);
       setTotal(data.total || 0);
+      setDeletedCount(data.deleted || 0);
     } catch (err) {
       onError(err.message);
     } finally {
       setLoading(false);
     }
-  }, [search, page, onError]);
+  }, [search, page, state, onError]);
 
   useEffect(() => {
     const t = setTimeout(refresh, 250);
@@ -249,6 +254,25 @@ export default function AdminChats({ onNotice, onError }) {
             setSearch(e.target.value);
           }}
         />
+        <select
+          className="field"
+          style={{ width: "auto" }}
+          value={state}
+          onChange={(e) => {
+            setPage(0);
+            setState(e.target.value);
+          }}
+        >
+          <option value="all">All chats</option>
+          <option value="live">Active only</option>
+          <option value="deleted">Deleted only</option>
+        </select>
+      </div>
+
+      <div className="muted" style={{ fontSize: 13, lineHeight: 1.7 }}>
+        A chat a user deletes “for everyone” is retained here rather than
+        destroyed — {deletedCount} so far. Deleting one from this panel is the
+        only action that actually removes it and its attachments from disk.
       </div>
 
       <div className="card" style={{ padding: 0 }}>
@@ -291,7 +315,28 @@ export default function AdminChats({ onNotice, onError }) {
                         {chatLabel(chat)}
                       </button>
                       {chat.self_destruct_seconds > 0 && (
-                        <span className="badge" title="Self-destruct timer"> 🔥</span>
+                        <span className="badge" title="Auto-delete timer"> 🔥</span>
+                      )}
+                      {chat.deleted_at && (
+                        <span
+                          className="badge"
+                          style={{ background: "#fee2e2", color: "#991b1b" }}
+                          title={`Deleted by ${chat.deleted_by || "a member"} on ${fmt(
+                            chat.deleted_at
+                          )} — retained for moderation`}
+                        >
+                          {" "}
+                          🗑 deleted
+                        </span>
+                      )}
+                      {chat.deleted_message_count > 0 && (
+                        <span
+                          className="badge"
+                          title={`${chat.deleted_message_count} message(s) deleted by their sender, retained here`}
+                        >
+                          {" "}
+                          {chat.deleted_message_count} removed
+                        </span>
                       )}
                     </td>
                     <td className="hide-sm">
@@ -345,74 +390,80 @@ export default function AdminChats({ onNotice, onError }) {
       )}
 
       {openChat && (
-        <div className="modal-overlay" onClick={() => setOpenChat(null)}>
-          <div
-            className="modal"
-            style={{ maxWidth: 640, width: "100%" }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ padding: 16 }} className="stack">
-              <div className="row" style={{ justifyContent: "space-between" }}>
-                <h3 style={{ margin: 0 }}>{chatLabel(openChat)}</h3>
-                <button className="btn btn-secondary" onClick={() => setOpenChat(null)}>
-                  Close
+        <Modal onClose={() => setOpenChat(null)} maxWidth={640}>
+        <div style={{ padding: 16 }} className="stack">
+          <div className="row" style={{ justifyContent: "space-between" }}>
+            <h3 style={{ margin: 0 }}>{chatLabel(openChat)}</h3>
+            <button className="btn btn-secondary" onClick={() => setOpenChat(null)}>
+              Close
+            </button>
+          </div>
+          <div className="muted" style={{ fontSize: 12 }}>
+            {chatKind(openChat)} · {openChat.members.join(", ")} ·{" "}
+            {openChat.message_count} messages
+          </div>
+
+          <div className="scroll-area" style={{ maxHeight: "55vh" }}>
+            {msgLoading && <div className="muted">Loading messages…</div>}
+            {!msgLoading && messages.length === 0 && (
+              <div className="muted">No messages.</div>
+            )}
+            {messages.map((m) => (
+              <div key={m.id} style={styles.msgRow}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={styles.msgMeta}>
+                    <strong>{m.from || "system"}</strong>
+                    <span> · {fmt(m.created_at)}</span>
+                    {m.is_encrypted && <span className="badge badge-secure"> encrypted</span>}
+                    {m.has_file && <span className="badge"> file</span>}
+                    {m.expires_at && <span className="badge"> 🔥</span>}
+                    {m.deleted_at && (
+                      <span
+                        className="badge"
+                        style={{ background: "#fee2e2", color: "#991b1b" }}
+                        title={`Deleted by ${m.deleted_by || "its sender"} on ${fmt(
+                          m.deleted_at
+                        )} — hidden from members, retained here`}
+                      >
+                        {" "}
+                        🗑 deleted
+                      </span>
+                    )}
+                  </div>
+                  <div dir="auto" style={styles.msgBody}>
+                    {m.is_encrypted
+                      ? `🔒 ciphertext (${m.content.length} chars) — not decryptable here`
+                      : m.has_file
+                      ? null
+                      : m.content}
+                  </div>
+
+                  {/* Attachments are viewable, not just named: an admin who
+                      can already read every message body gains nothing from
+                      being shown only a filename. */}
+                  {m.has_file && !m.is_encrypted && (
+                    <AdminAttachment message={m} onError={onError} />
+                  )}
+                </div>
+                <button
+                  className="btn btn-danger"
+                  style={{ padding: "2px 8px", fontSize: 12, flexShrink: 0 }}
+                  onClick={() => handleDeleteMessage(m)}
+                >
+                  Delete
                 </button>
               </div>
-              <div className="muted" style={{ fontSize: 12 }}>
-                {chatKind(openChat)} · {openChat.members.join(", ")} ·{" "}
-                {openChat.message_count} messages
-              </div>
-
-              <div className="scroll-area" style={{ maxHeight: "55vh" }}>
-                {msgLoading && <div className="muted">Loading messages…</div>}
-                {!msgLoading && messages.length === 0 && (
-                  <div className="muted">No messages.</div>
-                )}
-                {messages.map((m) => (
-                  <div key={m.id} style={styles.msgRow}>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={styles.msgMeta}>
-                        <strong>{m.from || "system"}</strong>
-                        <span> · {fmt(m.created_at)}</span>
-                        {m.is_encrypted && <span className="badge badge-secure"> encrypted</span>}
-                        {m.has_file && <span className="badge"> file</span>}
-                        {m.expires_at && <span className="badge"> 🔥</span>}
-                      </div>
-                      <div dir="auto" style={styles.msgBody}>
-                        {m.is_encrypted
-                          ? `🔒 ciphertext (${m.content.length} chars) — not decryptable here`
-                          : m.has_file
-                          ? null
-                          : m.content}
-                      </div>
-
-                      {/* Attachments are viewable, not just named: an admin who
-                          can already read every message body gains nothing from
-                          being shown only a filename. */}
-                      {m.has_file && !m.is_encrypted && (
-                        <AdminAttachment message={m} onError={onError} />
-                      )}
-                    </div>
-                    <button
-                      className="btn btn-danger"
-                      style={{ padding: "2px 8px", fontSize: 12, flexShrink: 0 }}
-                      onClick={() => handleDeleteMessage(m)}
-                    >
-                      Delete
-                    </button>
-                  </div>
-                ))}
-              </div>
-
-              <button
-                className="btn btn-danger btn-block"
-                onClick={() => handleDeleteChat(openChat)}
-              >
-                Delete entire chat
-              </button>
-            </div>
+            ))}
           </div>
+
+          <button
+            className="btn btn-danger btn-block"
+            onClick={() => handleDeleteChat(openChat)}
+          >
+            Delete entire chat
+          </button>
         </div>
+        </Modal>
       )}
     </div>
   );

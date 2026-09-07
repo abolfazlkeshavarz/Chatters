@@ -48,8 +48,8 @@ export function purgeE2EMessages() {
 
 /* ------------------------------------------------------- chat / message admin */
 
-export function listChats({ search = "", limit = 50, offset = 0 } = {}) {
-  const params = new URLSearchParams({ search, limit, offset });
+export function listChats({ search = "", limit = 50, offset = 0, state = "all" } = {}) {
+  const params = new URLSearchParams({ search, limit, offset, state });
   return api.get(`/api/admin/chats?${params}`);
 }
 

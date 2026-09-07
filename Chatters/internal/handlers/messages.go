@@ -56,6 +56,7 @@ func GetMessages(c *gin.Context) {
 		`UPDATE messages
 		 SET status = $3
 		 WHERE chat_id = $1 AND sender_id IS DISTINCT FROM $2 AND status <> $3
+		   AND deleted_at IS NULL
 		 RETURNING id`,
 		chatID, userID, websocket.StatusSeen,
 	)
@@ -96,6 +97,7 @@ func GetMessages(c *gin.Context) {
 		 LEFT JOIN message_keys mk ON mk.message_id = m.id AND mk.user_id = $2
 		 LEFT JOIN message_deletions md ON md.message_id = m.id AND md.user_id = $2
 		 WHERE m.chat_id = $1
+		   AND m.deleted_at IS NULL
 		   AND md.user_id IS NULL
 		   AND (m.expires_at IS NULL OR m.expires_at > now())
 		 ORDER BY m.id DESC

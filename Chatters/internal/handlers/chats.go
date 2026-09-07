@@ -72,6 +72,33 @@ func CreateChat(c *gin.Context) {
 		name = ""
 	}
 
+	// A pair of people gets exactly one ordinary conversation. Both pressing
+	// "new chat" used to produce a second, splitting their history across
+	// duplicates that each showed a different "last message". Returning the
+	// existing one is the friendly answer — the caller wanted to talk to that
+	// person, and now they are in the thread where that conversation already
+	// lives. Secret chats are exempt: a separate encrypted conversation
+	// alongside the normal one is the whole point of them.
+	var pairA, pairB string
+	if !req.IsGroup {
+		pairA, pairB = members[0], members[1]
+		if pairA > pairB {
+			pairA, pairB = pairB, pairA
+		}
+
+		var existing string
+		err := db.DB.QueryRow(
+			`SELECT p.chat_id FROM direct_chat_pairs p
+			 JOIN chats c ON c.id = p.chat_id AND c.deleted_at IS NULL
+			 WHERE p.user_a = $1 AND p.user_b = $2`,
+			pairA, pairB,
+		).Scan(&existing)
+		if err == nil {
+			c.JSON(http.StatusOK, gin.H{"chat_id": existing, "existing": true})
+			return
+		}
+	}
+
 	tx, err := db.DB.Begin()
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
@@ -87,6 +114,31 @@ func CreateChat(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create chat"})
 		return
+	}
+
+	// The claim is what actually enforces uniqueness. The lookup above races —
+	// two simultaneous requests both find nothing and both proceed — so the
+	// unique index is the arbiter, and the loser returns the winner's chat
+	// rather than an error the user cannot act on.
+	if !req.IsGroup {
+		if _, err := tx.Exec(
+			`INSERT INTO direct_chat_pairs (chat_id, user_a, user_b) VALUES ($1, $2, $3)`,
+			chatID, pairA, pairB,
+		); err != nil {
+			if isUniqueViolation(err, "idx_direct_chat_pair") {
+				_ = tx.Rollback()
+				var winner string
+				if err := db.DB.QueryRow(
+					`SELECT chat_id FROM direct_chat_pairs WHERE user_a = $1 AND user_b = $2`,
+					pairA, pairB,
+				).Scan(&winner); err == nil {
+					c.JSON(http.StatusOK, gin.H{"chat_id": winner, "existing": true})
+					return
+				}
+			}
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to create chat"})
+			return
+		}
 	}
 
 	// A single statement with a foreign key does the existence check for us,
@@ -145,6 +197,7 @@ func GetChats(c *gin.Context) {
 				chat_id, content, created_at, sender_id, is_encrypted, type
 			FROM messages
 			WHERE chat_id IN (SELECT chat_id FROM my_chats)
+			  AND deleted_at IS NULL
 			  AND (expires_at IS NULL OR expires_at > now())
 			  AND id NOT IN (
 				SELECT message_id FROM message_deletions WHERE user_id = $1
@@ -164,6 +217,7 @@ func GetChats(c *gin.Context) {
 				MAX(created_at) AS last_activity
 			FROM messages
 			WHERE chat_id IN (SELECT chat_id FROM my_chats)
+			  AND deleted_at IS NULL
 			  AND (expires_at IS NULL OR expires_at > now())
 			  AND id NOT IN (
 				SELECT message_id FROM message_deletions WHERE user_id = $1
@@ -194,6 +248,7 @@ func GetChats(c *gin.Context) {
 		LEFT JOIN last_msg lm ON lm.chat_id = c.id
 		LEFT JOIN chat_mutes cmt ON cmt.chat_id = c.id AND cmt.user_id = $1
 		WHERE c.id IN (SELECT chat_id FROM my_chats)
+		  AND c.deleted_at IS NULL
 		GROUP BY c.id, c.is_group, c.is_secret, c.self_destruct_seconds, c.e2e_enabled,
 		         c.e2e_status, c.e2e_requested_by,
 		         c.name, c.created_at, s.unread_count, s.last_activity,

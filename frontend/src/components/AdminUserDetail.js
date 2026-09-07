@@ -9,6 +9,7 @@ import {
 import { downloadFile, fetchFileURL } from "../api/files";
 import Avatar from "./Avatar";
 import ImageModal from "./ImageModal";
+import Modal from "./Modal";
 
 function formatDate(ts) {
   if (!ts) return "never";
@@ -268,7 +269,10 @@ export default function AdminUserDetail({ userId, onClose }) {
     : [];
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
+    <>
+      {/* Sibling of the dialog, not a child: the fullscreen viewer has to sit
+          above it, and nesting it inside would put it in the dialog's own
+          scrolling box. */}
       {preview && (
         <ImageModal
           imageUrl={preview.url}
@@ -289,160 +293,156 @@ export default function AdminUserDetail({ userId, onClose }) {
         />
       )}
 
-      <div
-        className="modal"
-        style={{ maxWidth: 640 }}
-        onClick={(e) => e.stopPropagation()}
-      >
-        <div style={{ padding: 20 }} className="stack">
-          <div className="row" style={{ alignItems: "center", gap: 14 }}>
-            <Avatar userId={userId} size={64} />
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <h3 style={{ margin: 0 }}>{userId}</h3>
-              {user && (
-                <div className="muted" style={{ fontSize: 13 }}>
-                  {user.is_admin ? "🛠️ Administrator" : "Regular user"}
-                  {user.avatar_visibility === "contacts" && " · photo is contacts-only"}
-                </div>
-              )}
-            </div>
-          </div>
-
-          {error && <div className="error-text">{error}</div>}
-          {!user && !error && <div className="muted">Loading…</div>}
-
+      <Modal onClose={onClose} maxWidth={640}>
+    <div style={{ padding: 20 }} className="stack">
+      <div className="row" style={{ alignItems: "center", gap: 14 }}>
+        <Avatar userId={userId} size={64} />
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <h3 style={{ margin: 0 }}>{userId}</h3>
           {user && (
-            <>
-              <div className="row" style={{ gap: 5, flexWrap: "wrap" }}>
-                {TABS.map((t) => (
-                  <button
-                    key={t.id}
-                    className={tab === t.id ? "btn" : "btn btn-secondary"}
-                    style={styles.tab}
-                    onClick={() => loadTab(t.id)}
-                  >
-                    {t.label}
-                    {t.count !== undefined && (
-                      <span style={styles.tabCount}>{t.count}</span>
-                    )}
-                  </button>
-                ))}
-              </div>
-
-              {busy && <div className="muted">Loading…</div>}
-
-              {tab === "overview" && (
-                <div className="card stack" style={{ gap: 2 }}>
-                  <Row label="Email" value={<span dir="ltr">{user.email}</span>} />
-                  <Row
-                    label="Phone"
-                    value={
-                      user.phone ? (
-                        <span dir="ltr">
-                          {user.phone}{" "}
-                          {user.phone_verified ? "✅ verified" : "⏳ unverified"}
-                        </span>
-                      ) : (
-                        "— none —"
-                      )
-                    }
-                  />
-                  {user.pending_phone && (
-                    <Row
-                      label="Pending phone"
-                      value={<span dir="ltr">{user.pending_phone} (awaiting review)</span>}
-                    />
-                  )}
-                  <Row label="Registered" value={formatDate(user.created_at)} />
-                  <Row label="Last seen" value={formatDate(user.last_seen_at)} />
-                  <Row
-                    label="Encryption key"
-                    value={user.has_keys ? "✅ present" : "— none —"}
-                  />
-                  <Row
-                    label="Profile photo"
-                    value={
-                      user.has_avatar
-                        ? `set · visibility: ${user.avatar_visibility}`
-                        : "— none —"
-                    }
-                  />
-                  <Row label="Secret chats" value={user.secret_chat_count} />
-                  <Row label="Sessions invalidated" value={user.token_version} />
-                  <Row label="Push devices" value={user.push_device_count} />
-                </div>
-              )}
-
-              {tab === "chats" && !busy && (
-                <div className="scroll-area stagger" style={styles.list}>
-                  {(chats || []).map((ch) => (
-                    <ChatRow key={ch.id} chat={ch} me={userId} />
-                  ))}
-                  {chats && chats.length === 0 && <Empty>Not in any chat.</Empty>}
-                </div>
-              )}
-
-              {tab === "messages" && !busy && (
-                <div className="scroll-area stagger" style={styles.list}>
-                  {(messages || []).map((m) => (
-                    <MessageRow key={m.id} message={m} onOpenMedia={openChatMedia} />
-                  ))}
-                  {messages && messages.length === 0 && (
-                    <Empty>Has not sent any messages.</Empty>
-                  )}
-                </div>
-              )}
-
-              {tab === "media" && !busy && (
-                <div className="scroll-area stagger" style={styles.list}>
-                  {(media || []).map((m) => (
-                    <MessageRow key={m.id} message={m} onOpenMedia={openChatMedia} />
-                  ))}
-                  {media && media.length === 0 && (
-                    <Empty>Has not sent any attachments.</Empty>
-                  )}
-                </div>
-              )}
-
-              {tab === "contacts" && (
-                <div className="scroll-area" style={styles.list}>
-                  {user.contacts.length === 0 && <Empty>No contacts.</Empty>}
-                  <div className="row" style={{ gap: 6, flexWrap: "wrap", padding: 4 }}>
-                    {user.contacts.map((c) => (
-                      <span key={c} className="badge">
-                        {c}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {tab === "files" && !busy && (
-                <div className="scroll-area stagger" style={styles.list}>
-                  {(files || []).map((f) => (
-                    <FileRow
-                      key={f.id}
-                      file={f}
-                      onOpen={openLibraryFile}
-                      onSave={saveLibraryFile}
-                    />
-                  ))}
-                  {files && files.length === 0 && (
-                    <Empty>Has not uploaded anything.</Empty>
-                  )}
-                </div>
-              )}
-            </>
+            <div className="muted" style={{ fontSize: 13 }}>
+              {user.is_admin ? "🛠️ Administrator" : "Regular user"}
+              {user.avatar_visibility === "contacts" && " · photo is contacts-only"}
+            </div>
           )}
-
-          <div className="row" style={{ justifyContent: "flex-end" }}>
-            <button className="btn btn-secondary" onClick={onClose}>
-              Close
-            </button>
-          </div>
         </div>
       </div>
+
+      {error && <div className="error-text">{error}</div>}
+      {!user && !error && <div className="muted">Loading…</div>}
+
+      {user && (
+        <>
+          <div className="row" style={{ gap: 5, flexWrap: "wrap" }}>
+            {TABS.map((t) => (
+              <button
+                key={t.id}
+                className={tab === t.id ? "btn" : "btn btn-secondary"}
+                style={styles.tab}
+                onClick={() => loadTab(t.id)}
+              >
+                {t.label}
+                {t.count !== undefined && (
+                  <span style={styles.tabCount}>{t.count}</span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          {busy && <div className="muted">Loading…</div>}
+
+          {tab === "overview" && (
+            <div className="card stack" style={{ gap: 2 }}>
+              <Row label="Email" value={<span dir="ltr">{user.email}</span>} />
+              <Row
+                label="Phone"
+                value={
+                  user.phone ? (
+                    <span dir="ltr">
+                      {user.phone}{" "}
+                      {user.phone_verified ? "✅ verified" : "⏳ unverified"}
+                    </span>
+                  ) : (
+                    "— none —"
+                  )
+                }
+              />
+              {user.pending_phone && (
+                <Row
+                  label="Pending phone"
+                  value={<span dir="ltr">{user.pending_phone} (awaiting review)</span>}
+                />
+              )}
+              <Row label="Registered" value={formatDate(user.created_at)} />
+              <Row label="Last seen" value={formatDate(user.last_seen_at)} />
+              <Row
+                label="Encryption key"
+                value={user.has_keys ? "✅ present" : "— none —"}
+              />
+              <Row
+                label="Profile photo"
+                value={
+                  user.has_avatar
+                    ? `set · visibility: ${user.avatar_visibility}`
+                    : "— none —"
+                }
+              />
+              <Row label="Secret chats" value={user.secret_chat_count} />
+              <Row label="Sessions invalidated" value={user.token_version} />
+              <Row label="Push devices" value={user.push_device_count} />
+            </div>
+          )}
+
+          {tab === "chats" && !busy && (
+            <div className="scroll-area stagger" style={styles.list}>
+              {(chats || []).map((ch) => (
+                <ChatRow key={ch.id} chat={ch} me={userId} />
+              ))}
+              {chats && chats.length === 0 && <Empty>Not in any chat.</Empty>}
+            </div>
+          )}
+
+          {tab === "messages" && !busy && (
+            <div className="scroll-area stagger" style={styles.list}>
+              {(messages || []).map((m) => (
+                <MessageRow key={m.id} message={m} onOpenMedia={openChatMedia} />
+              ))}
+              {messages && messages.length === 0 && (
+                <Empty>Has not sent any messages.</Empty>
+              )}
+            </div>
+          )}
+
+          {tab === "media" && !busy && (
+            <div className="scroll-area stagger" style={styles.list}>
+              {(media || []).map((m) => (
+                <MessageRow key={m.id} message={m} onOpenMedia={openChatMedia} />
+              ))}
+              {media && media.length === 0 && (
+                <Empty>Has not sent any attachments.</Empty>
+              )}
+            </div>
+          )}
+
+          {tab === "contacts" && (
+            <div className="scroll-area" style={styles.list}>
+              {user.contacts.length === 0 && <Empty>No contacts.</Empty>}
+              <div className="row" style={{ gap: 6, flexWrap: "wrap", padding: 4 }}>
+                {user.contacts.map((c) => (
+                  <span key={c} className="badge">
+                    {c}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {tab === "files" && !busy && (
+            <div className="scroll-area stagger" style={styles.list}>
+              {(files || []).map((f) => (
+                <FileRow
+                  key={f.id}
+                  file={f}
+                  onOpen={openLibraryFile}
+                  onSave={saveLibraryFile}
+                />
+              ))}
+              {files && files.length === 0 && (
+                <Empty>Has not uploaded anything.</Empty>
+              )}
+            </div>
+          )}
+        </>
+      )}
+
+      <div className="row" style={{ justifyContent: "flex-end" }}>
+        <button className="btn btn-secondary" onClick={onClose}>
+          Close
+        </button>
+      </div>
     </div>
+      </Modal>
+    </>
   );
 }
 

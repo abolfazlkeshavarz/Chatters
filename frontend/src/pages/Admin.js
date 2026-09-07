@@ -17,6 +17,7 @@ import AdminAnnouncements from "./AdminAnnouncements";
 import AdminFiles from "./AdminFiles";
 import AdminAudit from "./AdminAudit";
 import AdminUserDetail from "../components/AdminUserDetail";
+import Modal from "../components/Modal";
 
 const PAGE_SIZE = 25;
 
@@ -174,62 +175,60 @@ function CreateUserModal({ onClose, onCreated }) {
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div style={{ padding: 20 }} className="stack">
-          <h3 style={{ margin: 0 }}>New user</h3>
+    <Modal onClose={onClose}>
+    <div style={{ padding: 20 }} className="stack">
+      <h3 style={{ margin: 0 }}>New user</h3>
 
-          <input
-            className="field"
-            placeholder="Username"
-            autoComplete="off"
-            value={form.username}
-            onChange={update("username")}
-          />
-          <input
-            className="field"
-            placeholder="Email"
-            type="email"
-            autoComplete="off"
-            value={form.email}
-            onChange={update("email")}
-          />
-          <input
-            className="field"
-            placeholder="Temporary password (min 8 characters)"
-            type="password"
-            autoComplete="new-password"
-            value={form.password}
-            onChange={update("password")}
-          />
+      <input
+        className="field"
+        placeholder="Username"
+        autoComplete="off"
+        value={form.username}
+        onChange={update("username")}
+      />
+      <input
+        className="field"
+        placeholder="Email"
+        type="email"
+        autoComplete="off"
+        value={form.email}
+        onChange={update("email")}
+      />
+      <input
+        className="field"
+        placeholder="Temporary password (min 8 characters)"
+        type="password"
+        autoComplete="new-password"
+        value={form.password}
+        onChange={update("password")}
+      />
 
-          <label className="row" style={{ gap: 8 }}>
-            <input
-              type="checkbox"
-              checked={form.isAdmin}
-              onChange={update("isAdmin")}
-            />
-            <span>Grant administrator access</span>
-          </label>
+      <label className="row" style={{ gap: 8 }}>
+        <input
+          type="checkbox"
+          checked={form.isAdmin}
+          onChange={update("isAdmin")}
+        />
+        <span>Grant administrator access</span>
+      </label>
 
-          <p className="muted" style={{ margin: 0 }}>
-            The account generates its own encryption key the first time it signs
-            in — you never hold it.
-          </p>
+      <p className="muted" style={{ margin: 0 }}>
+        The account generates its own encryption key the first time it signs
+        in — you never hold it.
+      </p>
 
-          {error && <div className="error-text">{error}</div>}
+      {error && <div className="error-text">{error}</div>}
 
-          <div className="row" style={{ justifyContent: "flex-end" }}>
-            <button className="btn btn-secondary" onClick={onClose}>
-              Cancel
-            </button>
-            <button className="btn" onClick={submit} disabled={busy}>
-              {busy ? "Creating…" : "Create"}
-            </button>
-          </div>
-        </div>
+      <div className="row" style={{ justifyContent: "flex-end" }}>
+        <button className="btn btn-secondary" onClick={onClose}>
+          Cancel
+        </button>
+        <button className="btn" onClick={submit} disabled={busy}>
+          {busy ? "Creating…" : "Create"}
+        </button>
       </div>
     </div>
+    </Modal>
   );
 }
 
@@ -253,41 +252,39 @@ function ResetPasswordModal({ user, onClose, onDone }) {
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div style={{ padding: 20 }} className="stack">
-          <h3 style={{ margin: 0 }}>Reset password — {user.id}</h3>
+    <Modal onClose={onClose}>
+    <div style={{ padding: 20 }} className="stack">
+      <h3 style={{ margin: 0 }}>Reset password — {user.id}</h3>
 
-          <div style={styles.warning}>
-            <strong>This clears the user's encryption keys.</strong> Their
-            private key is locked with their old password, which nobody
-            (including this server) can recover. They will get a new key on next
-            sign-in and will not be able to read their existing encrypted
-            messages.
-          </div>
+      <div style={styles.warning}>
+        <strong>This clears the user's encryption keys.</strong> Their
+        private key is locked with their old password, which nobody
+        (including this server) can recover. They will get a new key on next
+        sign-in and will not be able to read their existing encrypted
+        messages.
+      </div>
 
-          <input
-            className="field"
-            placeholder="New password (min 8 characters)"
-            type="password"
-            autoComplete="new-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-          />
+      <input
+        className="field"
+        placeholder="New password (min 8 characters)"
+        type="password"
+        autoComplete="new-password"
+        value={password}
+        onChange={(e) => setPassword(e.target.value)}
+      />
 
-          {error && <div className="error-text">{error}</div>}
+      {error && <div className="error-text">{error}</div>}
 
-          <div className="row" style={{ justifyContent: "flex-end" }}>
-            <button className="btn btn-secondary" onClick={onClose}>
-              Cancel
-            </button>
-            <button className="btn btn-danger" onClick={submit} disabled={busy}>
-              {busy ? "Resetting…" : "Reset password"}
-            </button>
-          </div>
-        </div>
+      <div className="row" style={{ justifyContent: "flex-end" }}>
+        <button className="btn btn-secondary" onClick={onClose}>
+          Cancel
+        </button>
+        <button className="btn btn-danger" onClick={submit} disabled={busy}>
+          {busy ? "Resetting…" : "Reset password"}
+        </button>
       </div>
     </div>
+    </Modal>
   );
 }
 

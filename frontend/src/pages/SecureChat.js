@@ -15,16 +15,17 @@ import { safetyNumber, isSupported } from "../crypto/e2ee";
 import MessageList from "../components/MessageList";
 import Composer from "../components/Composer";
 import ConnectionBanner from "../components/ConnectionBanner";
+import Modal from "../components/Modal";
 
 // The self-destruct menu; must match the server's allowlist.
 const TIMER_OPTIONS = [
-  { label: "Off", seconds: 0 },
-  { label: "5 seconds", seconds: 5 },
-  { label: "30 seconds", seconds: 30 },
-  { label: "1 minute", seconds: 60 },
-  { label: "1 hour", seconds: 3600 },
-  { label: "1 day", seconds: 86400 },
-  { label: "1 week", seconds: 604800 },
+  { label: "خاموش", seconds: 0 },
+  { label: "۵ ثانیه", seconds: 5 },
+  { label: "۳۰ ثانیه", seconds: 30 },
+  { label: "۱ دقیقه", seconds: 60 },
+  { label: "۱ ساعت", seconds: 3600 },
+  { label: "۱ روز", seconds: 86400 },
+  { label: "۱ هفته", seconds: 604800 },
 ];
 
 function timerLabel(seconds) {
@@ -268,7 +269,7 @@ export default function SecureChat({
             {title}
           </div>
           <div style={styles.subtitle}>
-            End-to-end encrypted
+            رمزنگاری سرتاسری
             {selfDestruct > 0 && ` · 🔥 ${timerLabel(selfDestruct)}`}
           </div>
         </div>
@@ -277,7 +278,7 @@ export default function SecureChat({
           <button
             className="header-btn"
             onClick={() => setShowTimer(true)}
-            title="زمان‌سنج خودتخریبی"
+            title="حذف خودکار پیام‌ها"
           >
             ⏱
           </button>
@@ -325,52 +326,48 @@ export default function SecureChat({
       <ConnectionBanner status={status} />
 
       {showTimer && (
-        <div className="modal-overlay" onClick={() => setShowTimer(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div style={styles.modalBody}>
-              <h3 style={{ marginTop: 0 }}>زمان‌سنج خودتخریبی</h3>
-              <p className="muted">
-                New messages in this chat are deleted this long after they are
-                sent, on every device. Applies to messages sent from now on.
-              </p>
-              <div className="stack" style={{ gap: 6 }}>
-                {TIMER_OPTIONS.map((o) => (
-                  <button
-                    key={o.seconds}
-                    className={`btn ${o.seconds === selfDestruct ? "" : "btn-secondary"}`}
-                    style={{ justifyContent: "flex-start" }}
-                    onClick={() => changeTimer(o.seconds)}
-                  >
-                    {o.seconds === selfDestruct ? "✓ " : ""}
-                    {o.label}
-                  </button>
-                ))}
-              </div>
-            </div>
+        <Modal onClose={() => setShowTimer(false)}>
+        <div style={styles.modalBody}>
+          <h3 style={{ marginTop: 0 }}>حذف خودکار</h3>
+          <p className="muted">
+            پیام‌های جدید این گفتگو، این مدت پس از ارسال روی همه دستگاه‌ها
+            حذف می‌شوند. فقط روی پیام‌هایی که از این پس فرستاده می‌شوند اثر دارد.
+          </p>
+          <div className="stack" style={{ gap: 6 }}>
+            {TIMER_OPTIONS.map((o) => (
+              <button
+                key={o.seconds}
+                className={`btn ${o.seconds === selfDestruct ? "" : "btn-secondary"}`}
+                style={{ justifyContent: "flex-start" }}
+                onClick={() => changeTimer(o.seconds)}
+              >
+                {o.seconds === selfDestruct ? "✓ " : ""}
+                {o.label}
+              </button>
+            ))}
           </div>
         </div>
+        </Modal>
       )}
 
       {showVerify && (
-        <div className="modal-overlay" onClick={() => setShowVerify(false)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div style={styles.modalBody}>
-              <h3 style={{ marginTop: 0 }}>شماره امنیتی</h3>
-              <p className="muted">
-                Compare this number with the other person over a channel you
-                already trust — in person, or a phone call. If it matches on
-                both devices, nobody is intercepting this conversation.
-              </p>
-              <div style={styles.fingerprint}>{fingerprint}</div>
-              <button
-                className="btn btn-block"
-                onClick={() => setShowVerify(false)}
-              >
-                Close
-              </button>
-            </div>
-          </div>
+        <Modal onClose={() => setShowVerify(false)}>
+        <div style={styles.modalBody}>
+          <h3 style={{ marginTop: 0 }}>شماره امنیتی</h3>
+          <p className="muted">
+            Compare this number with the other person over a channel you
+            already trust — in person, or a phone call. If it matches on
+            both devices, nobody is intercepting this conversation.
+          </p>
+          <div style={styles.fingerprint}>{fingerprint}</div>
+          <button
+            className="btn btn-block"
+            onClick={() => setShowVerify(false)}
+          >
+            Close
+          </button>
         </div>
+        </Modal>
       )}
 
       {setupError && <div style={styles.blockingError}>{setupError}</div>}

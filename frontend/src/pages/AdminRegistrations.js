@@ -5,6 +5,7 @@ import {
   listRegistrations,
   rejectRegistration,
 } from "../api/admin";
+import Modal from "../components/Modal";
 
 function formatDate(ts) {
   try {
@@ -113,34 +114,32 @@ export default function AdminRegistrations({ onNotice, onError }) {
   return (
     <div className="stack">
       {rejecting && (
-        <div className="modal-overlay" onClick={() => setRejecting(null)}>
-          <div className="modal" onClick={(e) => e.stopPropagation()}>
-            <div style={{ padding: 20 }} className="stack">
-              <h3 style={{ margin: 0 }}>Reject "{rejecting.username}"</h3>
-              <p className="muted" style={{ margin: 0, lineHeight: 1.7 }}>
-                The reason is stored with the record for your own reference. It
-                is not emailed to the applicant — there is no mail delivery
-                configured.
-              </p>
-              <textarea
-                className="field"
-                rows={3}
-                placeholder="Reason (optional)"
-                style={{ resize: "vertical", fontFamily: "inherit" }}
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-              />
-              <div className="row" style={{ justifyContent: "flex-end", gap: 8 }}>
-                <button className="btn btn-secondary" onClick={() => setRejecting(null)}>
-                  Cancel
-                </button>
-                <button className="btn" onClick={reject} disabled={busyId === rejecting.id}>
-                  Reject
-                </button>
-              </div>
-            </div>
+        <Modal onClose={() => setRejecting(null)}>
+        <div style={{ padding: 20 }} className="stack">
+          <h3 style={{ margin: 0 }}>Reject "{rejecting.username}"</h3>
+          <p className="muted" style={{ margin: 0, lineHeight: 1.7 }}>
+            The reason is stored with the record for your own reference. It
+            is not emailed to the applicant — there is no mail delivery
+            configured.
+          </p>
+          <textarea
+            className="field"
+            rows={3}
+            placeholder="Reason (optional)"
+            style={{ resize: "vertical", fontFamily: "inherit" }}
+            value={reason}
+            onChange={(e) => setReason(e.target.value)}
+          />
+          <div className="row" style={{ justifyContent: "flex-end", gap: 8 }}>
+            <button className="btn btn-secondary" onClick={() => setRejecting(null)}>
+              Cancel
+            </button>
+            <button className="btn" onClick={reject} disabled={busyId === rejecting.id}>
+              Reject
+            </button>
           </div>
         </div>
+        </Modal>
       )}
 
       <div className="row" style={{ gap: 8, alignItems: "center" }}>

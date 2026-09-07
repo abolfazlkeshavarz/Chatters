@@ -9,6 +9,7 @@ import {
   uploadFile,
 } from "../api/files";
 import ImageModal from "../components/ImageModal";
+import Modal from "../components/Modal";
 
 function formatBytes(n) {
   if (!Number.isFinite(n) || n <= 0) return "";
@@ -280,85 +281,83 @@ function UploadModal({ onClose, onUploaded }) {
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div style={{ padding: 20 }} className="stack">
-          <h3 style={{ margin: 0 }}>بارگذاری فایل یا رسانه</h3>
+    <Modal onClose={onClose}>
+    <div style={{ padding: 20 }} className="stack">
+      <h3 style={{ margin: 0 }}>بارگذاری فایل یا رسانه</h3>
 
+      <input
+        type="file"
+        className="field"
+        onChange={(e) => {
+          const f = e.target.files?.[0] || null;
+          setFile(f);
+          if (f && !title) setTitle(f.name);
+        }}
+      />
+
+      <input
+        className="field"
+        placeholder="عنوان"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+      />
+
+      <textarea
+        className="field"
+        rows={3}
+        placeholder="توضیحات (اختیاری)"
+        style={{ resize: "vertical", fontFamily: "inherit" }}
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+      />
+
+      <div className="row" style={{ gap: 6 }}>
+        {[
+          { id: "public", label: "🌐 عمومی" },
+          { id: "private", label: "🔒 خصوصی" },
+        ].map((v) => (
+          <button
+            key={v.id}
+            className={visibility === v.id ? "btn" : "btn btn-secondary"}
+            style={{ flex: 1 }}
+            onClick={() => setVisibility(v.id)}
+          >
+            {v.label}
+          </button>
+        ))}
+      </div>
+
+      {visibility === "private" && (
+        <>
           <input
-            type="file"
             className="field"
-            onChange={(e) => {
-              const f = e.target.files?.[0] || null;
-              setFile(f);
-              if (f && !title) setTitle(f.name);
-            }}
+            type="password"
+            placeholder="رمز فایل (حداقل ۸ کاراکتر)"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
           />
-
-          <input
-            className="field"
-            placeholder="عنوان"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-
-          <textarea
-            className="field"
-            rows={3}
-            placeholder="توضیحات (اختیاری)"
-            style={{ resize: "vertical", fontFamily: "inherit" }}
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
-
-          <div className="row" style={{ gap: 6 }}>
-            {[
-              { id: "public", label: "🌐 عمومی" },
-              { id: "private", label: "🔒 خصوصی" },
-            ].map((v) => (
-              <button
-                key={v.id}
-                className={visibility === v.id ? "btn" : "btn btn-secondary"}
-                style={{ flex: 1 }}
-                onClick={() => setVisibility(v.id)}
-              >
-                {v.label}
-              </button>
-            ))}
+          <div className="muted" style={{ fontSize: 12, lineHeight: 1.7 }}>
+            این رمز را خودتان به کسانی که باید فایل را ببینند بدهید. رمز
+            قابل بازیابی نیست.
           </div>
+        </>
+      )}
 
-          {visibility === "private" && (
-            <>
-              <input
-                className="field"
-                type="password"
-                placeholder="رمز فایل (حداقل ۸ کاراکتر)"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-              <div className="muted" style={{ fontSize: 12, lineHeight: 1.7 }}>
-                این رمز را خودتان به کسانی که باید فایل را ببینند بدهید. رمز
-                قابل بازیابی نیست.
-              </div>
-            </>
-          )}
+      {progress !== null && (
+        <div className="muted">در حال بارگذاری… {progress}%</div>
+      )}
+      {error && <div className="error-text">{error}</div>}
 
-          {progress !== null && (
-            <div className="muted">در حال بارگذاری… {progress}%</div>
-          )}
-          {error && <div className="error-text">{error}</div>}
-
-          <div className="row" style={{ justifyContent: "flex-end", gap: 8 }}>
-            <button className="btn btn-secondary" onClick={onClose}>
-              انصراف
-            </button>
-            <button className="btn" onClick={submit} disabled={progress !== null}>
-              بارگذاری
-            </button>
-          </div>
-        </div>
+      <div className="row" style={{ justifyContent: "flex-end", gap: 8 }}>
+        <button className="btn btn-secondary" onClick={onClose}>
+          انصراف
+        </button>
+        <button className="btn" onClick={submit} disabled={progress !== null}>
+          بارگذاری
+        </button>
       </div>
     </div>
+    </Modal>
   );
 }
 
@@ -389,69 +388,67 @@ function EditModal({ file, onClose, onSaved }) {
   }
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div style={{ padding: 20 }} className="stack">
-          <h3 style={{ margin: 0 }}>ویرایش</h3>
+    <Modal onClose={onClose}>
+    <div style={{ padding: 20 }} className="stack">
+      <h3 style={{ margin: 0 }}>ویرایش</h3>
 
-          <input
-            className="field"
-            placeholder="عنوان"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-          <textarea
-            className="field"
-            rows={3}
-            style={{ resize: "vertical", fontFamily: "inherit" }}
-            placeholder="توضیحات"
-            value={description}
-            onChange={(e) => setDescription(e.target.value)}
-          />
+      <input
+        className="field"
+        placeholder="عنوان"
+        value={title}
+        onChange={(e) => setTitle(e.target.value)}
+      />
+      <textarea
+        className="field"
+        rows={3}
+        style={{ resize: "vertical", fontFamily: "inherit" }}
+        placeholder="توضیحات"
+        value={description}
+        onChange={(e) => setDescription(e.target.value)}
+      />
 
-          <div className="row" style={{ gap: 6 }}>
-            {[
-              { id: "public", label: "🌐 عمومی" },
-              { id: "private", label: "🔒 خصوصی" },
-            ].map((v) => (
-              <button
-                key={v.id}
-                className={visibility === v.id ? "btn" : "btn btn-secondary"}
-                style={{ flex: 1 }}
-                onClick={() => setVisibility(v.id)}
-              >
-                {v.label}
-              </button>
-            ))}
-          </div>
+      <div className="row" style={{ gap: 6 }}>
+        {[
+          { id: "public", label: "🌐 عمومی" },
+          { id: "private", label: "🔒 خصوصی" },
+        ].map((v) => (
+          <button
+            key={v.id}
+            className={visibility === v.id ? "btn" : "btn btn-secondary"}
+            style={{ flex: 1 }}
+            onClick={() => setVisibility(v.id)}
+          >
+            {v.label}
+          </button>
+        ))}
+      </div>
 
-          {visibility === "private" && (
-            <input
-              className="field"
-              type="password"
-              placeholder={
-                file.visibility === "private"
-                  ? "رمز جدید (خالی = بدون تغییر)"
-                  : "رمز فایل (حداقل ۸ کاراکتر)"
-              }
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-            />
-          )}
+      {visibility === "private" && (
+        <input
+          className="field"
+          type="password"
+          placeholder={
+            file.visibility === "private"
+              ? "رمز جدید (خالی = بدون تغییر)"
+              : "رمز فایل (حداقل ۸ کاراکتر)"
+          }
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+      )}
 
-          {error && <div className="error-text">{error}</div>}
+      {error && <div className="error-text">{error}</div>}
 
-          <div className="row" style={{ justifyContent: "flex-end", gap: 8 }}>
-            <button className="btn btn-secondary" onClick={onClose}>
-              انصراف
-            </button>
-            <button className="btn" onClick={submit}>
-              ذخیره
-            </button>
-          </div>
-        </div>
+      <div className="row" style={{ justifyContent: "flex-end", gap: 8 }}>
+        <button className="btn btn-secondary" onClick={onClose}>
+          انصراف
+        </button>
+        <button className="btn" onClick={submit}>
+          ذخیره
+        </button>
       </div>
     </div>
+    </Modal>
   );
 }
 

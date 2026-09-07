@@ -7,6 +7,7 @@ import {
   listUsers,
   setAnnouncementActive,
 } from "../api/admin";
+import Modal from "../components/Modal";
 
 function formatDate(ts) {
   try {
@@ -376,41 +377,39 @@ function ReadersModal({ id, onClose }) {
   const waiting = (readers || []).filter((r) => !r.acked);
 
   return (
-    <div className="modal-overlay" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div style={{ padding: 20 }} className="stack">
-          <h3 style={{ margin: 0 }}>Who has seen it</h3>
-          {readers === null && <div className="muted">Loading…</div>}
-          {readers && (
-            <>
-              <div className="muted">
-                {acked.length} acknowledged · {waiting.length} not yet
-              </div>
-              <div className="scroll-area" style={{ maxHeight: 320 }}>
-                {acked.map((r) => (
-                  <div key={r.user_id} style={styles.readerRow}>
-                    <span>✅ {r.user_id}</span>
-                    <span className="muted" style={{ fontSize: 12 }}>
-                      {formatDate(r.acked_at)}
-                    </span>
-                  </div>
-                ))}
-                {waiting.map((r) => (
-                  <div key={r.user_id} style={styles.readerRow}>
-                    <span className="muted">⏳ {r.user_id}</span>
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-          <div className="row" style={{ justifyContent: "flex-end" }}>
-            <button className="btn btn-secondary" onClick={onClose}>
-              Close
-            </button>
+    <Modal onClose={onClose}>
+    <div style={{ padding: 20 }} className="stack">
+      <h3 style={{ margin: 0 }}>Who has seen it</h3>
+      {readers === null && <div className="muted">Loading…</div>}
+      {readers && (
+        <>
+          <div className="muted">
+            {acked.length} acknowledged · {waiting.length} not yet
           </div>
-        </div>
+          <div className="scroll-area" style={{ maxHeight: 320 }}>
+            {acked.map((r) => (
+              <div key={r.user_id} style={styles.readerRow}>
+                <span>✅ {r.user_id}</span>
+                <span className="muted" style={{ fontSize: 12 }}>
+                  {formatDate(r.acked_at)}
+                </span>
+              </div>
+            ))}
+            {waiting.map((r) => (
+              <div key={r.user_id} style={styles.readerRow}>
+                <span className="muted">⏳ {r.user_id}</span>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      <div className="row" style={{ justifyContent: "flex-end" }}>
+        <button className="btn btn-secondary" onClick={onClose}>
+          Close
+        </button>
       </div>
     </div>
+    </Modal>
   );
 }
 
