@@ -8,20 +8,20 @@
       "developmentClient": true,
       "distribution": "internal",
       "env": {
-        "EXPO_PUBLIC_API_BASE": "https://staging.chatters.example.com"
+        "EXPO_PUBLIC_API_BASE": "https://chat.abolfazl.fun"
       }
     },
     "preview": {
       "distribution": "internal",
       "android": { "buildType": "apk" },
       "env": {
-        "EXPO_PUBLIC_API_BASE": "https://chatters.example.com"
+        "EXPO_PUBLIC_API_BASE": "https://chat.abolfazl.fun"
       }
     },
     "production": {
       "autoIncrement": true,
       "env": {
-        "EXPO_PUBLIC_API_BASE": "https://chatters.example.com"
+        "EXPO_PUBLIC_API_BASE": "https://chat.abolfazl.fun"
       }
     }
   },
