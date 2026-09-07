@@ -74,13 +74,27 @@ func Load() {
 		Production:      production,
 		VAPIDPublicKey:  os.Getenv("VAPID_PUBLIC_KEY"),
 		VAPIDPrivateKey: os.Getenv("VAPID_PRIVATE_KEY"),
-		VAPIDSubject:    env("VAPID_SUBJECT", "mailto:admin@example.com"),
+		VAPIDSubject:    vapidSubject(),
 		AdminUsername:   os.Getenv("ADMIN_USERNAME"),
 		AdminPassword:   os.Getenv("ADMIN_PASSWORD"),
 		AdminEmail:      os.Getenv("ADMIN_EMAIL"),
 		TrustedProxies:  trustedProxies(),
 		RedisURL:        os.Getenv("REDIS_URL"),
 	}
+}
+
+// vapidSubject resolves the VAPID "sub" contact and normalises it for the
+// push library. webpush-go prepends "mailto:" to anything that is not already
+// an https: URL, so a value that already carries the scheme — which every
+// example in this repo and the wild uses — would be signed as
+// "mailto:mailto:you@example.com". Apple's push gateway rejects that JWT with
+// 403 BadJwtToken (Firefox/Chrome's FCM endpoint does not validate "sub" and
+// silently accepts it, which is why the breakage looks iOS-only). Strip a
+// leading "mailto:" so both "mailto:you@example.com" and a bare
+// "you@example.com" work; an https: contact URL is passed through untouched.
+func vapidSubject() string {
+	s := strings.TrimSpace(env("VAPID_SUBJECT", "admin@example.com"))
+	return strings.TrimPrefix(s, "mailto:")
 }
 
 // trustedProxies lists the networks whose X-Forwarded-For header may be

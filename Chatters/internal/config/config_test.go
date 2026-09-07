@@ -84,6 +84,33 @@ func TestDatabaseURLPrefersExplicitDatabaseURL(t *testing.T) {
 	}
 }
 
+// webpush-go prepends "mailto:" to any subject that is not an https: URL, so a
+// value that already has the scheme is signed as "mailto:mailto:...", which
+// Apple's push gateway rejects with 403 BadJwtToken. vapidSubject strips it.
+func TestVAPIDSubjectStripsMailtoPrefix(t *testing.T) {
+	cases := map[string]string{
+		"mailto:admin@example.com": "admin@example.com",
+		"admin@example.com":        "admin@example.com",
+		"  mailto:a@b.co  ":        "a@b.co",
+		"https://example.com/push": "https://example.com/push",
+	}
+	for in, want := range cases {
+		t.Run(in, func(t *testing.T) {
+			t.Setenv("VAPID_SUBJECT", in)
+			if got := vapidSubject(); got != want {
+				t.Errorf("vapidSubject(%q) = %q, want %q", in, got, want)
+			}
+		})
+	}
+
+	t.Run("default", func(t *testing.T) {
+		t.Setenv("VAPID_SUBJECT", "")
+		if got := vapidSubject(); got != "admin@example.com" {
+			t.Errorf("default = %q, want %q", got, "admin@example.com")
+		}
+	})
+}
+
 func TestOriginAllowedSameOrigin(t *testing.T) {
 	C.AllowedOrigins = nil
 

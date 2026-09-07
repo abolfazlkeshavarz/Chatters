@@ -22,5 +22,5 @@ func main() {
 	fmt.Println("# Web Push (VAPID) keys — add these to your .env")
 	fmt.Printf("VAPID_PUBLIC_KEY=%s\n", public)
 	fmt.Printf("VAPID_PRIVATE_KEY=%s\n", private)
-	fmt.Println("VAPID_SUBJECT=mailto:you@example.com")
+	fmt.Println("VAPID_SUBJECT=you@example.com")
 }
