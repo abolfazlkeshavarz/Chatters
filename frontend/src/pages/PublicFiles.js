@@ -128,7 +128,7 @@ function FileCard({ file, me, onDeleted, onEdit }) {
   const mine = file.is_owner || file.owner === me;
 
   return (
-    <div className="card" style={styles.card}>
+    <div className="card card-interactive" style={styles.card}>
       {preview && (
         <ImageModal
           imageUrl={preview.url}
@@ -531,7 +531,7 @@ export default function PublicFiles() {
         </div>
       )}
 
-      <div className="scroll-area" style={styles.grid}>
+      <div className="scroll-area stagger" style={styles.grid}>
         {loading && <div style={styles.empty}>در حال بارگذاری…</div>}
         {!loading && files.length === 0 && (
           <div style={styles.empty}>هنوز فایلی بارگذاری نشده است.</div>

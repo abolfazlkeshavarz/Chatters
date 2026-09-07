@@ -231,6 +231,10 @@ func main() {
 
 			admin.GET("/users/:id/detail", handlers.AdminGetUser)
 			admin.PUT("/users/:id/phone", handlers.AdminSetUserPhone)
+			// Drill-downs behind the counters on the user detail view.
+			admin.GET("/users/:id/messages", handlers.AdminGetUserMessages)
+			admin.GET("/users/:id/chats", handlers.AdminGetUserChats)
+			admin.GET("/users/:id/files", handlers.AdminGetUserFiles)
 
 			admin.GET("/registrations", handlers.AdminListRegistrations)
 			admin.POST("/registrations/:id/approve", handlers.AdminApproveRegistration)

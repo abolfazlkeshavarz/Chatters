@@ -135,6 +135,198 @@ func AdminGetUser(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"user": u})
 }
 
+type adminUserMessage struct {
+	ID          int        `json:"id"`
+	ChatID      string     `json:"chat_id"`
+	ChatName    *string    `json:"chat_name,omitempty"`
+	IsGroup     bool       `json:"is_group"`
+	IsSecret    bool       `json:"is_secret"`
+	Members     []string   `json:"members"`
+	Content     string     `json:"content"`
+	Type        string     `json:"type"`
+	IsEncrypted bool       `json:"is_encrypted"`
+	HasFile     bool       `json:"has_file"`
+	Filename    *string    `json:"filename,omitempty"`
+	MimeType    *string    `json:"mime_type,omitempty"`
+	Status      string     `json:"status"`
+	CreatedAt   time.Time  `json:"created_at"`
+	ExpiresAt   *time.Time `json:"expires_at,omitempty"`
+}
+
+// AdminGetUserMessages returns what one account has actually sent, with the
+// conversation each message belongs to attached.
+//
+// This is the drill-down behind the counters on the user detail view: a number
+// on its own ("412 messages") tells a moderator nothing they can act on. Pass
+// media=1 to narrow it to attachments.
+//
+// Encrypted bodies come back as stored ciphertext and are flagged; the server
+// holds no key for them and this endpoint does not change that.
+func AdminGetUserMessages(c *gin.Context) {
+	target := c.Param("id")
+	mediaOnly := c.Query("media") == "1"
+
+	limit := 100
+	if v, err := strconv.Atoi(c.Query("limit")); err == nil && v > 0 && v <= 500 {
+		limit = v
+	}
+	offset := 0
+	if v, err := strconv.Atoi(c.Query("offset")); err == nil && v > 0 {
+		offset = v
+	}
+
+	rows, err := db.DB.Query(
+		`SELECT m.id, m.chat_id::text, ch.name, ch.is_group, ch.is_secret,
+		        COALESCE(m.content, ''), m.type, m.is_encrypted,
+		        m.file_path IS NOT NULL, m.filename, m.mime_type,
+		        m.status, m.created_at, m.expires_at,
+		        COALESCE((SELECT ARRAY_AGG(cm.user_id) FROM chat_members cm
+		                   WHERE cm.chat_id = ch.id), '{}')
+		 FROM messages m
+		 JOIN chats ch ON ch.id = m.chat_id
+		 WHERE m.sender_id = $1
+		   AND (NOT $2 OR m.file_path IS NOT NULL)
+		 ORDER BY m.id DESC
+		 LIMIT $3 OFFSET $4`,
+		target, mediaOnly, limit, offset,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load messages"})
+		return
+	}
+	defer rows.Close()
+
+	out := []adminUserMessage{}
+	for rows.Next() {
+		var m adminUserMessage
+		var chatName, filename, mimeType sql.NullString
+		var expiresAt sql.NullTime
+		if err := rows.Scan(
+			&m.ID, &m.ChatID, &chatName, &m.IsGroup, &m.IsSecret,
+			&m.Content, &m.Type, &m.IsEncrypted,
+			&m.HasFile, &filename, &mimeType,
+			&m.Status, &m.CreatedAt, &expiresAt, pq.Array(&m.Members),
+		); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to read messages"})
+			return
+		}
+		m.ChatName = nullStr(chatName)
+		m.Filename = nullStr(filename)
+		m.MimeType = nullStr(mimeType)
+		if expiresAt.Valid {
+			m.ExpiresAt = &expiresAt.Time
+		}
+		out = append(out, m)
+	}
+
+	var total int
+	_ = db.DB.QueryRow(
+		`SELECT COUNT(*) FROM messages
+		 WHERE sender_id = $1 AND (NOT $2 OR file_path IS NOT NULL)`,
+		target, mediaOnly,
+	).Scan(&total)
+
+	c.JSON(http.StatusOK, gin.H{"messages": out, "total": total})
+}
+
+// AdminGetUserChats lists every conversation an account belongs to, with the
+// other members and its last activity — the drill-down behind the chat counts.
+func AdminGetUserChats(c *gin.Context) {
+	target := c.Param("id")
+
+	rows, err := db.DB.Query(
+		`SELECT c.id::text, c.is_group, c.is_secret, c.e2e_enabled,
+		        c.self_destruct_seconds, c.name, c.created_at,
+		        COALESCE(ARRAY_AGG(DISTINCT cm2.user_id), '{}') AS members,
+		        (SELECT COUNT(*) FROM messages m WHERE m.chat_id = c.id) AS message_count,
+		        (SELECT COUNT(*) FROM messages m
+		          WHERE m.chat_id = c.id AND m.sender_id = $1) AS from_user,
+		        (SELECT MAX(m.created_at) FROM messages m WHERE m.chat_id = c.id) AS last_activity
+		 FROM chats c
+		 JOIN chat_members cm ON cm.chat_id = c.id AND cm.user_id = $1
+		 LEFT JOIN chat_members cm2 ON cm2.chat_id = c.id
+		 GROUP BY c.id
+		 ORDER BY last_activity DESC NULLS LAST, c.created_at DESC`,
+		target,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load chats"})
+		return
+	}
+	defer rows.Close()
+
+	type userChat struct {
+		ID                  string     `json:"id"`
+		IsGroup             bool       `json:"is_group"`
+		IsSecret            bool       `json:"is_secret"`
+		E2EEnabled          bool       `json:"e2e_enabled"`
+		SelfDestructSeconds int        `json:"self_destruct_seconds"`
+		Name                *string    `json:"name,omitempty"`
+		Members             []string   `json:"members"`
+		MessageCount        int        `json:"message_count"`
+		FromUser            int        `json:"from_user"`
+		CreatedAt           time.Time  `json:"created_at"`
+		LastActivity        *time.Time `json:"last_activity,omitempty"`
+	}
+
+	out := []userChat{}
+	for rows.Next() {
+		var ch userChat
+		var name sql.NullString
+		var last sql.NullTime
+		if err := rows.Scan(
+			&ch.ID, &ch.IsGroup, &ch.IsSecret, &ch.E2EEnabled,
+			&ch.SelfDestructSeconds, &name, &ch.CreatedAt,
+			pq.Array(&ch.Members), &ch.MessageCount, &ch.FromUser, &last,
+		); err != nil {
+			continue
+		}
+		ch.Name = nullStr(name)
+		if last.Valid {
+			ch.LastActivity = &last.Time
+		}
+		out = append(out, ch)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"chats": out})
+}
+
+// AdminGetUserFiles lists the account's uploads to the shared library.
+func AdminGetUserFiles(c *gin.Context) {
+	target := c.Param("id")
+
+	rows, err := db.DB.Query(
+		`SELECT id, owner_id, title, description, filename, mime_type,
+		        size_bytes, visibility, download_count, created_at
+		 FROM public_files
+		 WHERE owner_id = $1
+		 ORDER BY created_at DESC`,
+		target,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to load files"})
+		return
+	}
+	defer rows.Close()
+
+	out := []publicFile{}
+	for rows.Next() {
+		var f publicFile
+		var owner sql.NullString
+		if err := rows.Scan(
+			&f.ID, &owner, &f.Title, &f.Description, &f.Filename, &f.MimeType,
+			&f.SizeBytes, &f.Visibility, &f.DownloadCount, &f.CreatedAt,
+		); err != nil {
+			continue
+		}
+		f.Owner = nullStr(owner)
+		f.CanOpen = true
+		out = append(out, f)
+	}
+
+	c.JSON(http.StatusOK, gin.H{"files": out})
+}
+
 type auditEntry struct {
 	ID        int       `json:"id"`
 	Actor     *string   `json:"actor,omitempty"`

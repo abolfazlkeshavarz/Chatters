@@ -555,7 +555,7 @@ export default function ChatList({ initialChatId }) {
           </div>
         </div>
         <button
-          className="btn"
+          className="btn btn-icon btn-fab"
           style={styles.composeBtn}
           onClick={() => setModal("menu")}
           aria-label="جدید"
@@ -575,7 +575,7 @@ export default function ChatList({ initialChatId }) {
         </div>
       )}
 
-      <div className="scroll-area" style={styles.list}>
+      <div className="scroll-area stagger" style={styles.list}>
         {loading && <div style={styles.empty}>در حال بارگذاری…</div>}
 
         {!loading && chats.length === 0 && (
@@ -707,15 +707,10 @@ export default function ChatList({ initialChatId }) {
 const styles = {
   list: { padding: "0 12px 12px" },
   empty: { textAlign: "center", padding: 40, color: "var(--subtext)" },
-  composeBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: "50%",
-    fontSize: 22,
-    lineHeight: 1,
-    padding: 0,
-    flexShrink: 0,
-  },
+  // Shape and sizing live in the .btn-icon / .btn-fab classes: .btn sets a
+  // 44px min-height and 12px/16px padding that an inline width/height cannot
+  // override, which is what squashed this into an oval.
+  composeBtn: {},
   contactRow: {
     display: "flex",
     alignItems: "center",

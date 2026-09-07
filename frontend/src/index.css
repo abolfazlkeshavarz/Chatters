@@ -71,6 +71,11 @@
   --radius: 14px;
   --max-content: 1100px;
   --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
+
+  /* Slight overshoot. Motion that decelerates linearly reads as mechanical;
+     the tiny overrun past the resting point is most of what makes a panel
+     feel like it has mass rather than like a stylesheet changed. */
+  --spring: cubic-bezier(0.16, 1.12, 0.3, 1);
 }
 
 @media (prefers-color-scheme: dark) {
@@ -454,7 +459,7 @@ select:focus {
   overflow-y: auto;
   -webkit-overflow-scrolling: touch;
   box-shadow: var(--shadow-lg);
-  animation: modal-in 0.2s var(--ease);
+  animation: modal-in 0.24s var(--spring);
 }
 
 @keyframes overlay-in {
@@ -467,6 +472,52 @@ select:focus {
   from {
     opacity: 0;
     transform: translateY(8px) scale(0.98);
+  }
+}
+
+/*
+  On a phone, a centred dialog is the single clearest tell that something is a
+  web page: native apps present this exact kind of transient content as a sheet
+  that rises from the bottom edge, within thumb reach and with a grabber to
+  say so. Below the tablet breakpoint the same markup is re-laid-out as one,
+  with no change required at any call site.
+*/
+@media (max-width: 599px) {
+  .modal-overlay {
+    align-items: flex-end;
+    padding: 0;
+    padding-top: var(--safe-top);
+  }
+
+  .modal {
+    max-width: none;
+    border-radius: 22px 22px 0 0;
+    max-height: 92dvh;
+    padding-bottom: var(--safe-bottom);
+    animation: sheet-in 0.3s var(--spring);
+  }
+
+  /* The grabber. Purely affordance — it says "this drags/dismisses" the way a
+     rounded top edge alone does not. Sticky because the sheet scrolls its own
+     content, and a grabber that scrolls away stops reading as the sheet's
+     top edge. */
+  .modal::before {
+    content: "";
+    display: block;
+    position: sticky;
+    top: 0;
+    width: 38px;
+    height: 4px;
+    border-radius: 999px;
+    background: var(--border);
+    margin: 9px auto 0;
+    z-index: 2;
+  }
+}
+
+@keyframes sheet-in {
+  from {
+    transform: translateY(100%);
   }
 }
 
@@ -568,6 +619,242 @@ th {
   .hide-lg {
     display: none !important;
   }
+}
+
+/* ------------------------------------------------------------ app feel */
+
+/*
+  Browser chrome that native apps do not have. A long-press that pops a
+  "copy image" menu, a blue flash on every tap, a caret in a div, a text
+  selection dragged across a header — each one is a small reminder that this
+  is a web page. Text inside messages and fields stays selectable, because
+  there the browser behaviour is the correct one.
+*/
+body {
+  -webkit-tap-highlight-color: transparent;
+  -webkit-touch-callout: none;
+  user-select: none;
+}
+
+/* Anything whose content a person legitimately needs to copy: what they typed,
+   what someone sent them, and the ids and addresses in the admin tables. */
+input,
+textarea,
+[contenteditable],
+.selectable,
+.msg-text,
+td,
+th,
+code,
+pre {
+  user-select: text;
+  -webkit-touch-callout: default;
+}
+
+/* A round icon button. `.btn` sets a 44px min-height and 12px/16px padding,
+   which fought any fixed square size and squashed the result into an oval —
+   this resets all three so the element is genuinely circular. */
+.btn-icon {
+  width: 42px;
+  height: 42px;
+  min-height: 42px;
+  padding: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  line-height: 1;
+  font-size: 22px;
+  font-weight: 400;
+}
+
+/* The compose button, given the weight of a primary action: a real shadow in
+   the accent colour, and a press that dips rather than just dimming. */
+.btn-fab {
+  box-shadow: 0 4px 14px color-mix(in srgb, var(--primary) 42%, transparent);
+}
+
+.btn-fab:not(:disabled):hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 18px color-mix(in srgb, var(--primary) 52%, transparent);
+}
+
+.btn-fab:not(:disabled):active {
+  transform: scale(0.92);
+}
+
+/* Screens fade and rise slightly when switched to, so moving between tabs
+   reads as navigation rather than as a repaint. */
+.page-enter {
+  animation: page-in 0.26s var(--ease);
+}
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* Rows arrive in a short stagger. Capped at eight because beyond that the
+   last row waits long enough to feel like lag rather than choreography, and
+   a long list would otherwise animate for a visible second. */
+.stagger > * {
+  animation: row-in 0.3s var(--ease) both;
+}
+.stagger > *:nth-child(1) { animation-delay: 0.01s; }
+.stagger > *:nth-child(2) { animation-delay: 0.04s; }
+.stagger > *:nth-child(3) { animation-delay: 0.07s; }
+.stagger > *:nth-child(4) { animation-delay: 0.1s; }
+.stagger > *:nth-child(5) { animation-delay: 0.13s; }
+.stagger > *:nth-child(6) { animation-delay: 0.16s; }
+.stagger > *:nth-child(7) { animation-delay: 0.19s; }
+.stagger > *:nth-child(n + 8) { animation-delay: 0.22s; }
+
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+
+/* A new message bubble scales up from the edge it belongs to rather than
+   simply appearing. */
+.bubble-in {
+  animation: bubble-pop 0.26s var(--spring);
+}
+
+@keyframes bubble-pop {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.96);
+  }
+}
+
+/* The admin notice drops in from above the list it is pinned over. */
+.banner-in {
+  animation: banner-drop 0.36s var(--spring);
+}
+
+@keyframes banner-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-100%);
+  }
+}
+
+/* Tab bar: an active pill instead of a full-width block, and an icon that
+   lifts on selection — closer to how a native tab bar marks position. */
+.tabbar button {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  background: none;
+}
+
+.tabbar button[aria-current="page"] {
+  background: none;
+}
+
+/* No negative z-index here: the tab bar paints its own background, and a
+   child at z-index -1 would slide behind it and vanish. Left at auto, the
+   pseudo-element paints above that background and below the spans, which are
+   positioned and come later in DOM order. */
+.tabbar button[aria-current="page"]::before {
+  content: "";
+  position: absolute;
+  inset: 4px 10px;
+  border-radius: 12px;
+  background: var(--unread-bg);
+  animation: pill-in 0.24s var(--spring);
+}
+
+@keyframes pill-in {
+  from {
+    opacity: 0;
+    transform: scale(0.82);
+  }
+}
+
+.tabbar button > * {
+  position: relative;
+}
+
+.tabbar button[aria-current="page"] {
+  transform: translateY(-1px);
+}
+
+/* Cards lift slightly under the pointer on devices that have one. Guarded by
+   `hover: hover` so a touch device does not get a stuck hover state after a
+   tap, which is the usual way this effect goes wrong on phones. */
+@media (hover: hover) {
+  .card-interactive {
+    transition: transform 0.18s var(--ease), box-shadow 0.18s var(--ease);
+  }
+  .card-interactive:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-md);
+  }
+}
+
+/* Fields inside a flex row: without this a datetime-local input, whose
+   intrinsic width is wider than most, refuses to shrink below its content and
+   pushes its way out of the container — flex items default to
+   `min-width: auto`. */
+.field,
+.form-cell {
+  min-width: 0;
+}
+
+/* Label + control as one block, so a form row wraps as whole fields rather
+   than splitting a label from the input it names. */
+.form-cell {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  flex: 1 1 220px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/*
+  The floor is 170px, not something rounder like 210px: two columns plus the
+  gap have to fit inside a 460px modal minus its padding (~430px usable), and
+  210 × 2 + 12 = 432 overshoots that by two pixels — enough for auto-fit to
+  silently drop to a single column and stack the fields it was supposed to put
+  side by side. 170 leaves real headroom, and still stacks on a phone, where
+  two columns genuinely will not fit.
+*/
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+}
+
+/* A datetime-local is one of the few inputs with a fixed internal layout;
+   left alone it either overflows or centres its segments oddly inside a
+   padded, rounded field. */
+input[type="datetime-local"],
+input[type="date"],
+input[type="time"] {
+  width: 100%;
+  min-width: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  min-height: 46px;
+}
+
+input[type="color"] {
+  width: 40px;
+  height: 30px;
+  padding: 2px;
+  border-radius: 8px;
+  cursor: pointer;
+  background: var(--card);
 }
 
 @media (prefers-reduced-motion: reduce) {

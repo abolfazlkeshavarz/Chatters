@@ -90,6 +90,22 @@ export function setUserPhone(userId, phone) {
   return api.put(`/api/admin/users/${encodeURIComponent(userId)}/phone`, { phone });
 }
 
+/* Drill-downs behind the counters on the user detail view. */
+
+export function getUserMessages(userId, { mediaOnly = false, limit = 200 } = {}) {
+  const params = new URLSearchParams({ limit });
+  if (mediaOnly) params.set("media", "1");
+  return api.get(`/api/admin/users/${encodeURIComponent(userId)}/messages?${params}`);
+}
+
+export function getUserChats(userId) {
+  return api.get(`/api/admin/users/${encodeURIComponent(userId)}/chats`);
+}
+
+export function getUserFiles(userId) {
+  return api.get(`/api/admin/users/${encodeURIComponent(userId)}/files`);
+}
+
 /* --------------------------------------------------- registration requests */
 
 export function listRegistrations(status = "pending") {

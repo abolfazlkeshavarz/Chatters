@@ -364,7 +364,7 @@ export default function Profile({ onLogout }) {
                 onClick={handleRemoveAvatar}
                 disabled={avatarBusy}
               >
-                Remove photo
+                حذف عکس
               </button>
             )}
           </div>
@@ -382,7 +382,7 @@ export default function Profile({ onLogout }) {
           </select>
           <div className="muted" style={{ fontSize: 12 }}>
             {avatarVisibility === "contacts"
-              ? "Only people you have added as a contact, or who have added you, can see this photo — including in group chats."
+              ? "فقط کسانی که شما آن‌ها را به مخاطبین اضافه کرده‌اید، یا شما را اضافه کرده‌اند، این عکس را می‌بینند — حتی در گروه‌ها."
               : "برای همه کاربران وارد‌شده قابل مشاهده است."}
           </div>
         </div>
@@ -405,8 +405,8 @@ export default function Profile({ onLogout }) {
 
             {permission() === "denied" && (
               <div className="muted">
-                Notifications are blocked in your browser settings for this
-                site. You will need to allow them there first.
+                اعلان‌ها در تنظیمات مرورگر شما برای این سایت مسدود شده است.
+                ابتدا باید از همان‌جا اجازه دهید.
               </div>
             )}
           </>
@@ -416,8 +416,8 @@ export default function Profile({ onLogout }) {
 
         {!isStandalone() && (
           <div className="muted">
-            Tip: install Chatters to your Home Screen for reliable notifications
-            and a full-screen app.
+            نکته: Chatters را به صفحه اصلی گوشی اضافه کنید تا اعلان‌ها مطمئن‌تر
+            کار کنند و برنامه تمام‌صفحه باز شود.
           </div>
         )}
       </Section>
@@ -425,12 +425,12 @@ export default function Profile({ onLogout }) {
       <Section title="🔒 رمزنگاری">
         <div style={{ fontSize: 14 }}>
           {hasKey
-            ? "Your encryption key is unlocked on this device. Secure chats will open normally."
-            : "No encryption key is available on this device. Sign out and back in to unlock secure chats."}
+            ? "کلید رمزنگاری شما روی این دستگاه باز است. گفتگوهای محرمانه عادی باز می‌شوند."
+            : "کلید رمزنگاری روی این دستگاه موجود نیست. خارج شوید و دوباره وارد شوید تا گفتگوهای محرمانه باز شوند."}
         </div>
         <div className="muted">
-          Secure chats are encrypted in your browser. Nobody else — including
-          the server and administrators — can read them.
+          گفتگوهای محرمانه در مرورگر شما رمزنگاری می‌شوند. هیچ‌کس دیگری — حتی
+          سرور و مدیران — نمی‌تواند آن‌ها را بخواند.
         </div>
       </Section>
 
@@ -468,9 +468,9 @@ export default function Profile({ onLogout }) {
           onChange={(e) => setNewPassword(e.target.value)}
         />
         <div className="muted">
-          Changing your password issues a new encryption key. Messages in
-          existing secure chats stay readable only where your old key is still
-          stored.
+          تغییر رمز عبور یک کلید رمزنگاری جدید می‌سازد. پیام‌های گفتگوهای
+          محرمانه فعلی فقط روی دستگاه‌هایی خوانا می‌مانند که کلید قدیمی شما
+          هنوز آنجا ذخیره است.
         </div>
         <button
           className="btn btn-block"

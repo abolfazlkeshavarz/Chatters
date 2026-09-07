@@ -222,8 +222,16 @@ function Composer({ onSent, onError }) {
         </div>
       </div>
 
-      <div className="row" style={{ gap: 12, flexWrap: "wrap" }}>
-        <label style={{ ...styles.label, flex: "1 1 140px" }}>
+      {/*
+        A grid rather than a flex row: a datetime-local input has an unusually
+        wide intrinsic size, and as a flex item (which defaults to
+        `min-width: auto`) it refuses to shrink below it and pushes out of the
+        card. Grid tracks with a minmax floor size the cells instead of letting
+        the content dictate them, so the two fields sit inline and wrap
+        cleanly when there is no room for both.
+      */}
+      <div className="form-grid">
+        <label className="form-cell">
           Priority
           <select
             className="field"
@@ -238,14 +246,31 @@ function Composer({ onSent, onError }) {
           </select>
         </label>
 
-        <label style={{ ...styles.label, flex: "1 1 200px" }}>
+        <label className="form-cell">
           Expires (optional)
-          <input
-            className="field"
-            type="datetime-local"
-            value={draft.expires_at}
-            onChange={(e) => set({ expires_at: e.target.value })}
-          />
+          <div className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
+            <input
+              className="field"
+              type="datetime-local"
+              value={draft.expires_at}
+              onChange={(e) => set({ expires_at: e.target.value })}
+            />
+            {draft.expires_at && (
+              <button
+                className="btn btn-secondary btn-icon"
+                style={{ width: 38, height: 38, minHeight: 38, fontSize: 15 }}
+                title="Clear the expiry"
+                onClick={() => set({ expires_at: "" })}
+              >
+                ✕
+              </button>
+            )}
+          </div>
+          <span className="muted" style={{ fontWeight: 400, fontSize: 11 }}>
+            {draft.expires_at
+              ? `Hides itself on ${new Date(draft.expires_at).toLocaleString()}`
+              : "Stays until you deactivate it"}
+          </span>
         </label>
       </div>
 

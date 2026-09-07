@@ -42,7 +42,12 @@ export default function Home({ onLogout, initialChatId }) {
 
   return (
     <div className="app-shell">
-      <div className="app-content">
+      {/*
+        Keyed on the tab so React remounts on every switch, which is what
+        re-triggers the entrance animation — without the key the class stays
+        applied to a live element and the animation only ever plays once.
+      */}
+      <div className="app-content page-enter" key={tab}>
         {tab === "chats" && <ChatList initialChatId={initialChatId} />}
 
         {/* Manages its own scrolling: the grid is the scroll container so the
@@ -63,15 +68,21 @@ export default function Home({ onLogout, initialChatId }) {
       </div>
 
       <nav className="tabbar">
-        {tabs.map((t) => (
-          <button
-            key={t.id}
-            onClick={() => setTab(t.id)}
-            aria-current={tab === t.id ? "page" : undefined}
-          >
-            {t.label}
-          </button>
-        ))}
+        {tabs.map((t) => {
+          // Split so the glyph can lift independently of its label, the way a
+          // native tab bar animates its icon rather than the whole button.
+          const [icon, ...rest] = t.label.split(" ");
+          return (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              aria-current={tab === t.id ? "page" : undefined}
+            >
+              <span style={{ fontSize: 19, lineHeight: 1 }}>{icon}</span>
+              <span style={{ fontSize: 11 }}>{rest.join(" ")}</span>
+            </button>
+          );
+        })}
       </nav>
     </div>
   );

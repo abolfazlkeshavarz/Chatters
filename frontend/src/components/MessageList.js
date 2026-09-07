@@ -268,7 +268,7 @@ function MessageBody({ message, onOpen, onDownload, onRetry }) {
   }
 
   return (
-    <div dir="auto" style={styles.text}>
+    <div dir="auto" className="msg-text" style={styles.text}>
       {message.content}
     </div>
   );
@@ -432,6 +432,7 @@ export default function MessageList({
               }}
             >
               <div
+                className="bubble-in"
                 onMouseDown={() => startHold(m)}
                 onMouseUp={endHold}
                 onMouseLeave={endHold}

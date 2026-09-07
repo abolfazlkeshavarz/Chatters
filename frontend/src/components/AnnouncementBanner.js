@@ -65,6 +65,8 @@ export default function AnnouncementBanner() {
 
   return (
     <div
+      className="banner-in"
+      key={current.id}
       style={{ ...styles.wrap, background: accent, color: text }}
       role="status"
       aria-live="polite"
