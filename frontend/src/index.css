@@ -70,6 +70,10 @@
   --header-h: 56px;
   --radius: 14px;
   --max-content: 1100px;
+  /* Reading width for conversation-shaped content. A chat row stretched
+     across a wide monitor puts the avatar an inch from its timestamp, so the
+     list, the transcript and the header above them all track this instead. */
+  --pane-max: 720px;
   --ease: cubic-bezier(0.2, 0.7, 0.3, 1);
 
   /* Slight overshoot. Motion that decelerates linearly reads as mechanical;
@@ -323,6 +327,23 @@ select:focus {
   position: relative;
   z-index: 1;
   box-shadow: var(--shadow-sm);
+}
+
+/*
+  The bar still spans the window — its background and bottom border should —
+  but its contents line up with the cards beneath it. Padding rather than an
+  inner wrapper, so this needs no markup change at any of the five call sites.
+
+  The +12px is the track's own padding: `box-sizing: border-box` means the
+  720px track *includes* that padding, so a card's left edge sits 12px inside
+  the track, not on it. Without the offset the header title hangs 12px to the
+  outside of the column it is supposed to head.
+
+  No media query: max() already clamps to the 12px phone gutter once the
+  window is narrower than the track, so one declaration covers every width.
+*/
+.app-header {
+  padding-inline: max(12px, calc((100% - var(--pane-max)) / 2 + 12px));
 }
 
 /* ------------------------------------------------------------ components */
@@ -798,6 +819,67 @@ pre {
   .card-interactive:hover {
     transform: translateY(-2px);
     box-shadow: var(--shadow-md);
+  }
+
+  /* A chat row lifts toward the reader rather than only tinting, which is
+     what makes a list feel like stacked cards instead of table rows. */
+  .list-row {
+    transition: background-color 0.14s var(--ease), transform 0.14s var(--ease),
+      box-shadow 0.14s var(--ease);
+  }
+  .list-row:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--shadow-md);
+  }
+}
+
+/* A press that scales the whole row, so the touch target visibly answers the
+   finger even where hover does not exist. */
+.list-row:active {
+  transform: scale(0.985);
+}
+
+/* The unread pill draws attention once on arrival instead of sitting static. */
+.unread-pop {
+  animation: unread-pop 0.34s var(--spring);
+}
+
+@keyframes unread-pop {
+  from {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+}
+
+/* Header controls get the same round, evenly-sized touch target as the
+   compose button, instead of three differently-shaped emoji. */
+.header-btn {
+  width: 38px;
+  height: 38px;
+  min-height: 38px;
+  padding: 0;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  font-size: 17px;
+  line-height: 1;
+  background: none;
+  border: none;
+}
+
+@media (hover: hover) {
+  .header-btn:hover {
+    background: var(--unread-bg);
+  }
+}
+
+/* Danger is signalled on interaction rather than by permanently colouring the
+   glyph red, which would shout from the header of every open conversation. */
+@media (hover: hover) {
+  .header-btn-danger:hover {
+    background: color-mix(in srgb, var(--danger) 14%, transparent);
   }
 }
 

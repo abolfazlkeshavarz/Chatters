@@ -43,7 +43,15 @@ function timerLabel(seconds) {
  * Either member can set a self-destruct timer that deletes each message a fixed
  * time after it is sent.
  */
-export default function SecureChat({ chatId, title, chat, onBack, onChatPatch, onSecured }) {
+export default function SecureChat({
+  chatId,
+  title,
+  chat,
+  onBack,
+  onChatPatch,
+  onSecured,
+  onDeleteChat,
+}) {
   const me = localStorage.getItem("username");
 
   const pending = !chat?.e2e_enabled && chat?.e2e_status === "pending";
@@ -267,9 +275,9 @@ export default function SecureChat({ chatId, title, chat, onBack, onChatPatch, o
 
         {chat?.is_secret && (
           <button
+            className="header-btn"
             onClick={() => setShowTimer(true)}
             title="زمان‌سنج خودتخریبی"
-            style={styles.muteBtn}
           >
             ⏱
           </button>
@@ -285,8 +293,8 @@ export default function SecureChat({ chatId, title, chat, onBack, onChatPatch, o
               onChatPatch?.({ muted: !next });
             }
           }}
+          className="header-btn"
           title={chat?.muted ? "فعال کردن اعلان‌ها" : "بی‌صدا کردن اعلان‌ها"}
-          style={styles.muteBtn}
         >
           {chat?.muted ? "🔕" : "🔔"}
         </button>
@@ -296,7 +304,20 @@ export default function SecureChat({ chatId, title, chat, onBack, onChatPatch, o
             className="badge badge-secure"
             onClick={() => setShowVerify(true)}
           >
-            Verify
+            تأیید هویت
+          </button>
+        )}
+
+        {/* Deleting a secret chat removes it for both people, so it belongs
+            inside the conversation rather than on its row in the list. */}
+        {onDeleteChat && (
+          <button
+            className="header-btn header-btn-danger"
+            onClick={onDeleteChat}
+            title="حذف گفتگوی محرمانه برای هر دو نفر"
+            aria-label="حذف گفتگوی محرمانه"
+          >
+            🗑
           </button>
         )}
       </div>
@@ -397,14 +418,6 @@ export default function SecureChat({ chatId, title, chat, onBack, onChatPatch, o
 const styles = {
   header: { borderBottom: "1px solid var(--secure)" },
   back: { fontSize: 24, minWidth: 40, padding: 8 },
-  muteBtn: {
-    border: "none",
-    background: "none",
-    fontSize: 18,
-    padding: 8,
-    cursor: "pointer",
-    lineHeight: 1,
-  },
   titleBox: { flex: 1, minWidth: 0 },
   title: {
     fontSize: 16,

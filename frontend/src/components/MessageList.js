@@ -398,6 +398,7 @@ export default function MessageList({
       )}
 
       <div className="scroll-area" ref={scrollRef} onScroll={onScroll} style={styles.list}>
+        <div style={styles.listInner}>
         {messages.length === 0 && (
           <div style={styles.empty}>
             {secure ? "🔒 هنوز پیامی در این گفتگوی محرمانه نیست" : "هنوز پیامی نیست"}
@@ -541,16 +542,29 @@ export default function MessageList({
         })}
 
         <div ref={bottomRef} />
+        </div>
       </div>
     </>
   );
 }
 
 const styles = {
-  list: {
+  // The scroll container stays full-bleed so the wheel works anywhere over the
+  // pane and the scrollbar sits at the window edge; the inner track carries
+  // the reading width.
+  list: { padding: 0 },
+  listInner: {
+    // Centred on a wide screen for the same reason the chat list is: a
+    // transcript spanning a full monitor puts an incoming bubble and the reply
+    // to it at opposite edges, which is unreadable.
+    width: "100%",
+    maxWidth: "var(--pane-max)",
+    margin: "0 auto",
+    minHeight: "100%",
     padding: "10px 8px",
     display: "flex",
     flexDirection: "column",
+    justifyContent: "flex-end",
     gap: 6,
   },
   empty: {

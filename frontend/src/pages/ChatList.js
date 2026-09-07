@@ -462,10 +462,10 @@ export default function ChatList({ initialChatId }) {
     e?.stopPropagation();
     const label =
       scope === "everyone"
-        ? "Delete this secret chat for both of you? This cannot be undone."
+        ? "این گفتگوی محرمانه برای هر دو نفر حذف شود؟ این کار قابل بازگشت نیست."
         : chat.is_group
         ? "از این گروه خارج می‌شوید؟"
-        : "Remove this chat from your list? The other person keeps their copy.";
+        : "این گفتگو از فهرست شما حذف شود؟ نسخه طرف مقابل باقی می‌ماند.";
     if (!window.confirm(label)) return;
 
     setChats((prev) => prev.filter((c) => c.id !== chat.id));
@@ -502,6 +502,9 @@ export default function ChatList({ initialChatId }) {
         chat={active}
         onBack={closeChat}
         onOpenChat={openChatById}
+        onDeleteChat={() =>
+          handleDeleteChat(active, active.is_secret ? "everyone" : "me")
+        }
         onChatPatch={(patch) =>
           setActive((prev) => (prev && prev.id === active.id ? { ...prev, ...patch } : prev))
         }
@@ -575,14 +578,15 @@ export default function ChatList({ initialChatId }) {
         </div>
       )}
 
-      <div className="scroll-area stagger" style={styles.list}>
+      <div className="scroll-area" style={styles.list}>
+        <div className="stagger" style={styles.listInner}>
         {loading && <div style={styles.empty}>در حال بارگذاری…</div>}
 
         {!loading && chats.length === 0 && (
           <div style={styles.empty}>
-            <div style={{ fontSize: 40 }}>💬</div>
-            <div>هنوز گفتگویی نیست</div>
-            <div className="muted">از دکمه بالا یک گفتگو شروع کنید</div>
+            <div style={{ fontSize: 44 }}>💬</div>
+            <div style={{ fontSize: 15 }}>هنوز گفتگویی نیست</div>
+            <div className="muted">از دکمه + بالا یک گفتگو شروع کنید</div>
           </div>
         )}
 
@@ -650,21 +654,16 @@ export default function ChatList({ initialChatId }) {
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
                     <button
+                      className="header-btn"
+                      style={{ width: 30, height: 30, minHeight: 30, fontSize: 14 }}
                       onClick={(e) => toggleMute(chat, e)}
                       title={chat.muted ? "فعال کردن صدا" : "بی‌صدا کردن اعلان‌ها"}
-                      style={styles.muteBtn}
                     >
                       {chat.muted ? "🔕" : "🔔"}
                     </button>
-                    <button
-                      onClick={(e) =>
-                        handleDeleteChat(chat, chat.is_secret ? "everyone" : "me", e)
-                      }
-                      title={chat.is_group ? "خروج از گروه" : "حذف گفتگو"}
-                      style={styles.muteBtn}
-                    >
-                      🗑
-                    </button>
+                    {/* Deleting lives in the open conversation's header, not
+                        here: a destructive control one mis-tap away from the
+                        row you meant to open is the wrong place for it. */}
                     <div className="muted" style={{ fontSize: 12 }}>
                       {formatTime(chat.last_message_time)}
                     </div>
@@ -690,7 +689,7 @@ export default function ChatList({ initialChatId }) {
                     {preview}
                   </div>
                   {unread && (
-                    <div style={styles.unread}>
+                    <div className="unread-pop" style={styles.unread}>
                       {chat.unread_count > 9 ? "9+" : chat.unread_count}
                     </div>
                   )}
@@ -699,14 +698,36 @@ export default function ChatList({ initialChatId }) {
             </div>
           );
         })}
+        </div>
       </div>
     </div>
   );
 }
 
 const styles = {
-  list: { padding: "0 12px 12px" },
-  empty: { textAlign: "center", padding: 40, color: "var(--subtext)" },
+  // The scroll container is full-bleed so the scrollbar sits at the window
+  // edge where it belongs; the inner track is what carries the margins and
+  // the reading width. Without the max-width, rows stretched the full span of
+  // a desktop monitor and the avatar ended up an inch from its timestamp.
+  list: { padding: 0 },
+  listInner: {
+    width: "100%",
+    maxWidth: 720,
+    margin: "0 auto",
+    padding: "12px 12px calc(12px + var(--safe-bottom))",
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+  },
+  empty: {
+    textAlign: "center",
+    padding: "56px 24px",
+    color: "var(--subtext)",
+    display: "flex",
+    flexDirection: "column",
+    gap: 8,
+    alignItems: "center",
+  },
   // Shape and sizing live in the .btn-icon / .btn-fab classes: .btn sets a
   // 44px min-height and 12px/16px padding that an inline width/height cannot
   // override, which is what squashed this into an oval.
@@ -730,14 +751,6 @@ const styles = {
     padding: "4px 8px",
     fontSize: 12,
   },
-  muteBtn: {
-    border: "none",
-    background: "none",
-    padding: 2,
-    fontSize: 14,
-    cursor: "pointer",
-    lineHeight: 1,
-  },
   pendingHint: {
     fontSize: 12,
     color: "var(--secure, #30b06a)",
@@ -750,7 +763,8 @@ const styles = {
     gap: 12,
     width: "100%",
     padding: 12,
-    marginBottom: 8,
+    // Spacing comes from the track's flex gap, not a margin here: a margin on
+    // the last row leaves dead space under the list that the gap does not.
     borderRadius: 14,
     border: "1px solid var(--border)",
     boxShadow: "var(--shadow-sm)",

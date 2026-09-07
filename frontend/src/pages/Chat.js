@@ -15,7 +15,15 @@ import ConnectionBanner from "../components/ConnectionBanner";
  * starts a separate Telegram-style secret chat with the other person (a new
  * conversation, pending until they accept); this chat stays exactly as it is.
  */
-export default function Chat({ chatId, title, chat, onBack, onChatPatch, onOpenChat }) {
+export default function Chat({
+  chatId,
+  title,
+  chat,
+  onBack,
+  onChatPatch,
+  onOpenChat,
+  onDeleteChat,
+}) {
   const me = localStorage.getItem("username");
   const [replyTo, setReplyTo] = useState(null);
   const [notice, setNotice] = useState("");
@@ -116,9 +124,9 @@ export default function Chat({ chatId, title, chat, onBack, onChatPatch, onOpenC
         </div>
 
         <button
+          className="header-btn"
           onClick={handleToggleMute}
           title={chat?.muted ? "فعال کردن اعلان‌ها" : "بی‌صدا کردن اعلان‌ها"}
-          style={styles.muteBtn}
         >
           {chat?.muted ? "🔕" : "🔔"}
         </button>
@@ -131,6 +139,20 @@ export default function Chat({ chatId, title, chat, onBack, onChatPatch, onOpenC
             title="شروع گفتگوی محرمانه (رمزنگاری سرتاسری)"
           >
             {busy ? "…" : "🔒 گفتگوی محرمانه"}
+          </button>
+        )}
+
+        {/* Destructive, so it sits here inside the conversation you are
+            already looking at rather than on its row in the list, where it
+            was one mis-tap from the chat you meant to open. */}
+        {onDeleteChat && (
+          <button
+            className="header-btn header-btn-danger"
+            onClick={onDeleteChat}
+            title={chat?.is_group ? "خروج از گروه" : "حذف گفتگو"}
+            aria-label={chat?.is_group ? "خروج از گروه" : "حذف گفتگو"}
+          >
+            {chat?.is_group ? "🚪" : "🗑"}
           </button>
         )}
       </div>
@@ -185,13 +207,5 @@ const styles = {
     fontSize: 13,
     cursor: "pointer",
     flexShrink: 0,
-  },
-  muteBtn: {
-    border: "none",
-    background: "none",
-    fontSize: 18,
-    padding: 8,
-    cursor: "pointer",
-    lineHeight: 1,
   },
 };

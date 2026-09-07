@@ -179,6 +179,11 @@ const styles = {
     padding: 8,
     gap: 8,
     alignItems: "flex-end",
+    // Tracks the transcript above it, so on a wide screen the input does not
+    // span the window while the messages it produces sit in a centred column.
+    width: "100%",
+    maxWidth: "var(--pane-max)",
+    margin: "0 auto",
   },
   iconBtn: {
     width: 44,
