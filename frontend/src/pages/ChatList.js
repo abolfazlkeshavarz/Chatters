@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
-import { createChat, getChats, setChatMute } from "../api/chats";
+import {
+  createChat,
+  createSecretChat,
+  deleteChat,
+  getChats,
+  setChatMute,
+} from "../api/chats";
 import { addContact, getContacts, removeContact } from "../api/contacts";
 import { chatSocket } from "../services/websocket";
 import Avatar from "../components/Avatar";
@@ -39,6 +45,7 @@ function ComposeMenu({ onClose, onPick }) {
   const options = [
     { key: "contacts", icon: "👤", label: "Add contact" },
     { key: "direct", icon: "💬", label: "New chat" },
+    { key: "secret", icon: "🔒", label: "New secret chat" },
     { key: "group", icon: "👥", label: "New group" },
   ];
 
@@ -167,6 +174,7 @@ function AddContactModal({ onClose, onAdded, contacts, onRemove }) {
 // gets a checkbox list and an explicit Create button instead.
 function PickContactsModal({ mode, contacts, onClose, onCreate, onOpenContacts }) {
   const isGroup = mode === "group";
+  const isSecret = mode === "secret";
   const [selected, setSelected] = useState([]);
   const [name, setName] = useState("");
   const [error, setError] = useState("");
@@ -184,7 +192,7 @@ function PickContactsModal({ mode, contacts, onClose, onCreate, onOpenContacts }
     setBusy(true);
     setError("");
     try {
-      await onCreate(members, isGroup, name.trim());
+      await onCreate(members, isGroup, name.trim(), isSecret);
       onClose();
     } catch (err) {
       setError(err.message);
@@ -196,7 +204,9 @@ function PickContactsModal({ mode, contacts, onClose, onCreate, onOpenContacts }
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal" onClick={(e) => e.stopPropagation()}>
         <div style={{ padding: 20 }} className="stack">
-          <h3 style={{ margin: 0 }}>{isGroup ? "New group" : "New chat"}</h3>
+          <h3 style={{ margin: 0 }}>
+            {isGroup ? "New group" : isSecret ? "🔒 New secret chat" : "New chat"}
+          </h3>
 
           {isGroup && (
             <input
@@ -318,8 +328,14 @@ export default function ChatList({ initialChatId }) {
     chatSocket.start();
 
     const offMessage = chatSocket.onMessage((msg) => {
-      if (msg.type === "message" || msg.type === "media") {
+      if (msg.type === "message" || msg.type === "media" || msg.type === "deleted") {
         load();
+        return;
+      }
+
+      if (msg.type === "chat_deleted") {
+        load();
+        setActive((prev) => (prev && prev.id === msg.chat_id ? null : prev));
         return;
       }
 
@@ -333,7 +349,8 @@ export default function ChatList({ initialChatId }) {
           if (msg.type === "e2e_accepted") {
             return { ...prev, e2e_status: "accepted", e2e_enabled: true };
           }
-          return { ...prev, e2e_status: "none", e2e_requested_by: null };
+          // rejected: the pending secret chat is gone
+          return null;
         });
       }
     });
@@ -354,9 +371,17 @@ export default function ChatList({ initialChatId }) {
     if (chat) setActive(chat);
   }, [initialChatId, chats]);
 
-  async function handleCreate(members, isGroup, name) {
-    const { chat_id: chatId } = await createChat(members, isGroup, name);
+  async function handleCreate(members, isGroup, name, isSecret) {
+    const { chat_id: chatId } = isSecret
+      ? await createSecretChat(members[0])
+      : await createChat(members, isGroup, name);
     const freshChats = await load();
+
+    if (isSecret && chatId) {
+      const created = freshChats.find((c) => c.id === chatId);
+      if (created) setActive(created);
+      return;
+    }
 
     // Direct chats jump straight in, matching how picking a contact felt like
     // "start this conversation" rather than "create an entry in a list I now
@@ -384,6 +409,33 @@ export default function ChatList({ initialChatId }) {
     load();
   }
 
+  function openChatById(id) {
+    load().then((fresh) => {
+      const c = (fresh || []).find((x) => x.id === id);
+      if (c) setActive(c);
+    });
+  }
+
+  async function handleDeleteChat(chat, scope, e) {
+    e?.stopPropagation();
+    const label =
+      scope === "everyone"
+        ? "Delete this secret chat for both of you? This cannot be undone."
+        : chat.is_group
+        ? "Leave this group?"
+        : "Remove this chat from your list? The other person keeps their copy.";
+    if (!window.confirm(label)) return;
+
+    setChats((prev) => prev.filter((c) => c.id !== chat.id));
+    setActive((prev) => (prev && prev.id === chat.id ? null : prev));
+    try {
+      await deleteChat(chat.id, scope);
+    } catch (err) {
+      setError(err.message || "Could not delete the chat");
+      load();
+    }
+  }
+
   async function toggleMute(chat, e) {
     e.stopPropagation();
     const next = !chat.muted;
@@ -398,15 +450,16 @@ export default function ChatList({ initialChatId }) {
   }
 
   if (active) {
-    // Encryption is a property of the conversation, so the secure page simply
-    // replaces the normal one once it is switched on.
-    const Page = active.e2e_enabled ? SecureChat : Chat;
+    // The secure page handles secret chats (pending + active) and any legacy
+    // in-place encrypted chat; everything else is a normal chat.
+    const Page = active.is_secret || active.e2e_enabled ? SecureChat : Chat;
     return (
       <Page
         chatId={active.id}
         title={chatTitle(active, me)}
         chat={active}
         onBack={closeChat}
+        onOpenChat={openChatById}
         onChatPatch={(patch) =>
           setActive((prev) => (prev && prev.id === active.id ? { ...prev, ...patch } : prev))
         }
@@ -442,7 +495,7 @@ export default function ChatList({ initialChatId }) {
         />
       )}
 
-      {(modal === "direct" || modal === "group") && (
+      {(modal === "direct" || modal === "group" || modal === "secret") && (
         <PickContactsModal
           mode={modal}
           contacts={contacts}
@@ -492,7 +545,9 @@ export default function ChatList({ initialChatId }) {
           const unread = chat.unread_count > 0;
 
           let preview;
-          if (chat.last_is_encrypted) {
+          if (chat.last_is_system && chat.last_message) {
+            preview = chat.last_message;
+          } else if (chat.last_is_encrypted) {
             preview = "🔒 Encrypted message";
           } else if (chat.last_message) {
             const prefix =
@@ -536,9 +591,15 @@ export default function ChatList({ initialChatId }) {
               <div style={styles.chatBody}>
                 <div style={styles.chatTop}>
                   <div style={styles.chatTitle}>
-                    {chat.e2e_enabled && <span title="End-to-end encrypted">🔒 </span>}
+                    {(chat.e2e_enabled || chat.is_secret) && (
+                      <span title={chat.is_secret ? "Secret chat" : "End-to-end encrypted"}>🔒 </span>
+                    )}
                     {title}
+                    {chat.is_secret && <span className="badge badge-secure"> secret</span>}
                     {chat.is_group && <span className="badge"> group</span>}
+                    {chat.self_destruct_seconds > 0 && (
+                      <span title="Self-destruct timer on" style={{ opacity: 0.7 }}> 🔥</span>
+                    )}
                     {chat.muted && <span title="Muted" style={{ opacity: 0.5 }}> 🔕</span>}
                   </div>
                   <div style={{ display: "flex", alignItems: "center", gap: 6, flexShrink: 0 }}>
@@ -549,17 +610,26 @@ export default function ChatList({ initialChatId }) {
                     >
                       {chat.muted ? "🔕" : "🔔"}
                     </button>
+                    <button
+                      onClick={(e) =>
+                        handleDeleteChat(chat, chat.is_secret ? "everyone" : "me", e)
+                      }
+                      title={chat.is_group ? "Leave group" : "Delete chat"}
+                      style={styles.muteBtn}
+                    >
+                      🗑
+                    </button>
                     <div className="muted" style={{ fontSize: 12 }}>
                       {formatTime(chat.last_message_time)}
                     </div>
                   </div>
                 </div>
 
-                {chat.e2e_status === "pending" && (
+                {chat.is_secret && chat.e2e_status === "pending" && (
                   <div style={styles.pendingHint}>
                     {chat.e2e_requested_by === me
-                      ? "🔒 Waiting for them to accept encryption…"
-                      : "🔒 Wants to start an encrypted chat — open to respond"}
+                      ? "🔒 Waiting for them to accept…"
+                      : "🔒 Wants to start a secret chat — open to respond"}
                   </div>
                 )}
 

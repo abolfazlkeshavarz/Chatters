@@ -17,6 +17,26 @@ function isMedia(m) {
   return m.type === "media" || m.has_file || Boolean(m.filename);
 }
 
+function isSystem(m) {
+  return m.type === "system" || m.is_system || (!m.from && !m.is_encrypted);
+}
+
+/** "self-destructs in 4s" / "…in 3m" countdown for a message with an expiry. */
+function SelfDestructBadge({ expiresAt, now }) {
+  const remaining = Math.max(0, new Date(expiresAt).getTime() - now);
+  if (remaining <= 0) return null;
+  const secs = Math.ceil(remaining / 1000);
+  const label =
+    secs < 60
+      ? `${secs}s`
+      : secs < 3600
+      ? `${Math.ceil(secs / 60)}m`
+      : secs < 86400
+      ? `${Math.ceil(secs / 3600)}h`
+      : `${Math.ceil(secs / 86400)}d`;
+  return <span title="Self-destructs after sending"> · 🔥 {label}</span>;
+}
+
 function isImage(m) {
   if (m.mime_type) return m.mime_type.startsWith("image/");
   const name = m.filename || m.content || "";
@@ -63,7 +83,13 @@ function MessageBody({ message, onOpenImage, onDownload }) {
   );
 }
 
-export default function MessageList({ messages, me, onReply, secure = false }) {
+export default function MessageList({
+  messages,
+  me,
+  onReply,
+  onDelete,
+  secure = false,
+}) {
   const bottomRef = useRef(null);
   const scrollRef = useRef(null);
   const pinnedToBottom = useRef(true);
@@ -71,6 +97,16 @@ export default function MessageList({ messages, me, onReply, secure = false }) {
   const [heldId, setHeldId] = useState(null);
   const [preview, setPreview] = useState(null);
   const holdTimer = useRef(null);
+
+  // Drives the self-destruct countdowns and hides a message the instant its
+  // timer runs out, rather than waiting for the server's sweep broadcast.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const hasTimers = messages.some((m) => m.expires_at);
+    if (!hasTimers) return undefined;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [messages]);
 
   // Only auto-scroll when the user is already at the bottom, so arriving
   // messages do not yank them away from history they are reading.
@@ -191,8 +227,23 @@ export default function MessageList({ messages, me, onReply, secure = false }) {
         )}
 
         {messages.map((m) => {
+          // Hide a self-destruct message the moment its timer elapses; the
+          // server sweep will remove it for good within a few seconds.
+          if (m.expires_at && new Date(m.expires_at).getTime() <= now) {
+            return null;
+          }
+
+          if (isSystem(m)) {
+            return (
+              <div key={m.id} style={styles.systemRow}>
+                <span style={styles.systemPill}>{m.content}</span>
+              </div>
+            );
+          }
+
           const mine = m.from === me;
           const replied = m.reply_to ? byId.get(m.reply_to) : null;
+          const canDeleteEveryone = mine || secure;
 
           return (
             <div
@@ -242,6 +293,9 @@ export default function MessageList({ messages, me, onReply, secure = false }) {
                 <div style={styles.meta}>
                   {secure && <span title="End-to-end encrypted">🔒 </span>}
                   {formatTime(m.created_at)}
+                  {m.expires_at && (
+                    <SelfDestructBadge expiresAt={m.expires_at} now={now} />
+                  )}
                   {mine && (
                     <span className="sr-only">
                       {" — "}
@@ -264,6 +318,28 @@ export default function MessageList({ messages, me, onReply, secure = false }) {
                     {!isMedia(m) && !m.decryptError && (
                       <button style={styles.action} onClick={() => copy(m)}>
                         📋 Copy
+                      </button>
+                    )}
+                    {onDelete && (
+                      <button
+                        style={styles.action}
+                        onClick={() => {
+                          onDelete(m, "me");
+                          setHeldId(null);
+                        }}
+                      >
+                        🗑 Delete for me
+                      </button>
+                    )}
+                    {onDelete && canDeleteEveryone && (
+                      <button
+                        style={styles.action}
+                        onClick={() => {
+                          onDelete(m, "everyone");
+                          setHeldId(null);
+                        }}
+                      >
+                        🗑 Delete for everyone
                       </button>
                     )}
                     <button style={styles.action} onClick={() => setHeldId(null)}>
@@ -296,6 +372,20 @@ const styles = {
     marginTop: 32,
   },
   row: { display: "flex" },
+  systemRow: {
+    display: "flex",
+    justifyContent: "center",
+    margin: "4px 0",
+  },
+  systemPill: {
+    fontSize: 12,
+    color: "var(--subtext)",
+    background: "var(--bubble-in)",
+    borderRadius: 12,
+    padding: "4px 12px",
+    textAlign: "center",
+    maxWidth: "90%",
+  },
   bubble: {
     maxWidth: "min(85%, 560px)",
     padding: "10px 14px",

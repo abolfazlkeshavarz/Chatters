@@ -10,6 +10,7 @@ import {
   setE2ERetention,
   setRole,
 } from "../api/admin";
+import AdminChats from "./AdminChats";
 
 const PAGE_SIZE = 25;
 
@@ -276,6 +277,7 @@ export default function Admin() {
   const [notice, setNotice] = useState("");
   const [showCreate, setShowCreate] = useState(false);
   const [resetting, setResetting] = useState(null);
+  const [tab, setTab] = useState("users"); // 'users' | 'chats'
 
   const refresh = useCallback(async () => {
     setLoading(true);
@@ -345,6 +347,28 @@ export default function Admin() {
         </div>
       </div>
 
+      <div className="row" style={{ gap: 8 }}>
+        <button
+          className={`btn ${tab === "users" ? "" : "btn-secondary"}`}
+          onClick={() => setTab("users")}
+        >
+          Overview & users
+        </button>
+        <button
+          className={`btn ${tab === "chats" ? "" : "btn-secondary"}`}
+          onClick={() => setTab("chats")}
+        >
+          Chats & messages
+        </button>
+      </div>
+
+      {error && <div className="error-text">{error}</div>}
+      {notice && <div style={styles.notice}>{notice}</div>}
+
+      {tab === "chats" && <AdminChats onNotice={flash} onError={setError} />}
+
+      {tab === "users" && (
+      <>
       <div style={styles.statGrid}>
         <StatCard label="Users" value={stats.users} />
         <StatCard label="Chats" value={stats.chats} />
@@ -375,9 +399,6 @@ export default function Admin() {
           + New user
         </button>
       </div>
-
-      {error && <div className="error-text">{error}</div>}
-      {notice && <div style={styles.notice}>{notice}</div>}
 
       <div className="card" style={{ padding: 0 }}>
         <div className="table-wrap">
@@ -486,6 +507,8 @@ export default function Admin() {
             Next →
           </button>
         </div>
+      )}
+      </>
       )}
 
       {showCreate && (

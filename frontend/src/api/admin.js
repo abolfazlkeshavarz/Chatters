@@ -45,3 +45,25 @@ export function setE2ERetention(seconds) {
 export function purgeE2EMessages() {
   return api.post("/api/admin/e2e/purge-now");
 }
+
+/* ------------------------------------------------------- chat / message admin */
+
+export function listChats({ search = "", limit = 50, offset = 0 } = {}) {
+  const params = new URLSearchParams({ search, limit, offset });
+  return api.get(`/api/admin/chats?${params}`);
+}
+
+export function getChatMessages(chatId, { limit = 200, offset = 0 } = {}) {
+  const params = new URLSearchParams({ limit, offset });
+  return api.get(
+    `/api/admin/chats/${encodeURIComponent(chatId)}/messages?${params}`
+  );
+}
+
+export function deleteChatAdmin(chatId) {
+  return api.del(`/api/admin/chats/${encodeURIComponent(chatId)}`);
+}
+
+export function deleteMessageAdmin(messageId) {
+  return api.del(`/api/admin/messages/${encodeURIComponent(messageId)}`);
+}

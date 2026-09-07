@@ -42,7 +42,7 @@ func groupNotificationTitle(chatID, sender string) (title string, prefixSender b
 // chat silenced ordinary messages but not attachment uploads, the one other
 // caller of this function.
 func notifyChat(chatID, sender string, n push.Notification) {
-	if !push.Enabled() {
+	if !push.Active() {
 		return
 	}
 
@@ -71,7 +71,7 @@ func notifyChat(chatID, sender string, n push.Notification) {
 			if db.IsChatMuted(chatID, userID) {
 				continue
 			}
-			push.SendToUser(userID, n)
+			push.Notify(userID, n)
 		}
 	}()
 }

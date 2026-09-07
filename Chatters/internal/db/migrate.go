@@ -111,6 +111,18 @@ var migrations = []string{
 	`CREATE INDEX IF NOT EXISTS idx_message_keys_user ON message_keys(user_id)`,
 	`CREATE INDEX IF NOT EXISTS idx_push_subscriptions_user ON push_subscriptions(user_id)`,
 
+	// --- Native app push tokens (Expo / FCM / APNs via Expo) ---
+	// One row per app install. The token is the primary key so re-registering
+	// after a re-login moves the device to the current user instead of failing.
+	`CREATE TABLE IF NOT EXISTS device_push_tokens (
+		token      TEXT PRIMARY KEY,
+		user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+		platform   TEXT NOT NULL DEFAULT 'expo',
+		created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_device_push_tokens_user ON device_push_tokens(user_id)`,
+
 	// --- E2E encryption: consent handshake ---
 	// e2e_enabled flips on only once the OTHER member accepts, so a chat can no
 	// longer be silently upgraded by one side. 'accepted' implies e2e_enabled;
@@ -171,6 +183,40 @@ var migrations = []string{
 	`ALTER TABLE users DROP CONSTRAINT IF EXISTS users_avatar_visibility_check`,
 	`ALTER TABLE users ADD CONSTRAINT users_avatar_visibility_check
 		CHECK (avatar_visibility IN ('public','contacts'))`,
+
+	// --- Message deletion ---
+	// "Delete for me" is a per-user tombstone: the row stays for other members,
+	// but every query that returns a user their messages filters these out.
+	// "Delete for everyone" hard-deletes the row and is broadcast so open
+	// clients drop it live.
+	`CREATE TABLE IF NOT EXISTS message_deletions (
+		message_id INTEGER NOT NULL REFERENCES messages(id) ON DELETE CASCADE,
+		user_id    TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+		deleted_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+		PRIMARY KEY (message_id, user_id)
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_message_deletions_user ON message_deletions(user_id)`,
+
+	// --- Secret chats (Telegram-style) ---
+	// A dedicated 1:1 encrypted conversation, created by the request/accept
+	// handshake as its OWN chat rather than by upgrading an existing one in
+	// place. Legacy in-place e2e_enabled 1:1 chats are back-filled as secret so
+	// they keep behaving the same.
+	`ALTER TABLE chats ADD COLUMN IF NOT EXISTS is_secret BOOLEAN NOT NULL DEFAULT false`,
+	`UPDATE chats SET is_secret = true WHERE e2e_enabled AND NOT is_group`,
+
+	// Self-destruct timer for a secret chat, in seconds; 0 = off. Either member
+	// may change it; it applies to messages sent afterwards.
+	`ALTER TABLE chats ADD COLUMN IF NOT EXISTS self_destruct_seconds INTEGER NOT NULL DEFAULT 0`,
+
+	// When set, a background sweep deletes the message at this time and tells
+	// open clients. Stamped at insert from the chat's self_destruct_seconds.
+	`ALTER TABLE messages ADD COLUMN IF NOT EXISTS expires_at TIMESTAMPTZ`,
+	`CREATE INDEX IF NOT EXISTS idx_messages_expires_at ON messages(expires_at) WHERE expires_at IS NOT NULL`,
+
+	// 'system' messages carry a server-rendered notice (timer changed, …) with
+	// no sender. The column had no CHECK constraint, so this is just documenting
+	// the new value.
 }
 
 // renameCascades repoints foreign keys at users(id) so that renaming a user

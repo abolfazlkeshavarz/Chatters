@@ -55,6 +55,68 @@ func Subscribe(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "subscribed"})
 }
 
+// RegisterDevice stores (or moves to the current user) the Expo push token a
+// native app install obtained from expo-notifications. Called on every app
+// launch once notifications are granted, so it is an idempotent upsert.
+func RegisterDevice(c *gin.Context) {
+	userID := c.GetString("user_id")
+
+	var req struct {
+		Token    string `json:"token"`
+		Platform string `json:"platform"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Token == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid token"})
+		return
+	}
+
+	platform := req.Platform
+	if platform == "" {
+		platform = "expo"
+	}
+
+	_, err := db.DB.Exec(
+		`INSERT INTO device_push_tokens (token, user_id, platform)
+		 VALUES ($1, $2, $3)
+		 ON CONFLICT (token) DO UPDATE
+		   SET user_id    = EXCLUDED.user_id,
+		       platform   = EXCLUDED.platform,
+		       updated_at = now()`,
+		req.Token, userID, platform,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to save device"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "registered"})
+}
+
+// UnregisterDevice drops a native app install's push token, e.g. on sign-out
+// or when the user turns notifications off in the app.
+func UnregisterDevice(c *gin.Context) {
+	userID := c.GetString("user_id")
+
+	var req struct {
+		Token string `json:"token"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil || req.Token == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid request"})
+		return
+	}
+
+	_, err := db.DB.Exec(
+		`DELETE FROM device_push_tokens WHERE token = $1 AND user_id = $2`,
+		req.Token, userID,
+	)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to remove device"})
+		return
+	}
+
+	c.JSON(http.StatusOK, gin.H{"status": "unregistered"})
+}
+
 func Unsubscribe(c *gin.Context) {
 	userID := c.GetString("user_id")
 

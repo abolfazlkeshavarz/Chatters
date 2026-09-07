@@ -124,8 +124,11 @@ func UploadMedia(c *gin.Context) {
 	var messageID int
 	var createdAt time.Time
 	err = tx.QueryRow(
-		`INSERT INTO messages (chat_id, sender_id, content, type, file_path, filename, mime_type)
-		 VALUES ($1, $2, $3, 'media', $4, $5, $6)
+		`INSERT INTO messages (chat_id, sender_id, content, type, file_path, filename, mime_type, expires_at)
+		 VALUES ($1, $2, $3, 'media', $4, $5, $6,
+		         (SELECT CASE WHEN self_destruct_seconds > 0
+		                      THEN now() + (self_destruct_seconds || ' seconds')::interval END
+		            FROM chats WHERE id = $1))
 		 RETURNING id, created_at`,
 		chatID, userID, originalName, path, originalName, mimeType,
 	).Scan(&messageID, &createdAt)

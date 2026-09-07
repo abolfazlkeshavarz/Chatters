@@ -21,6 +21,29 @@ export function advanceStatus(current, next) {
 }
 
 /**
+ * Total order for messages within a conversation.
+ *
+ * The server assigns `id` from a single sequence at the one point every message
+ * is persisted, so it strictly reflects insertion order and is identical on
+ * every device. Sorting on the client-parsed timestamp instead lost
+ * sub-millisecond precision, so two messages sent in the same millisecond could
+ * land in a different order on each device — which is why an encrypted
+ * conversation could look reordered between phones. Compare by id; fall back to
+ * the timestamp only for anything that somehow has no numeric id yet.
+ */
+export function compareMessages(a, b) {
+  const ai = Number.isFinite(a.id) ? a.id : null;
+  const bi = Number.isFinite(b.id) ? b.id : null;
+  if (ai !== null && bi !== null) return ai - bi;
+  const at = new Date(a.created_at).getTime() || 0;
+  const bt = new Date(b.created_at).getTime() || 0;
+  if (at !== bt) return at - bt;
+  if (ai !== null) return -1;
+  if (bi !== null) return 1;
+  return 0;
+}
+
+/**
  * Drives one conversation: initial load, live updates, reconnect resync and
  * sending. Both the plain and the end-to-end encrypted chat pages use it.
  *
@@ -78,11 +101,13 @@ export function useChat({ chatId, encrypted = false, privateKey = null, recipien
         // Server copies win: they carry the authoritative status/timestamp.
         byId.set(m.id, { ...byId.get(m.id), ...m });
       }
-      return [...byId.values()].sort(
-        (a, b) =>
-          new Date(a.created_at) - new Date(b.created_at) || a.id - b.id
-      );
+      return [...byId.values()].sort(compareMessages);
     });
+  }, []);
+
+  const dropMessages = useCallback((ids) => {
+    const gone = new Set(ids);
+    setMessages((prev) => prev.filter((m) => !gone.has(m.id)));
   }, []);
 
   const load = useCallback(async () => {
@@ -126,13 +151,25 @@ export function useChat({ chatId, encrypted = false, privateKey = null, recipien
         return;
       }
 
+      // "delete for everyone" and the self-destruct sweep both arrive as this.
+      if (msg.type === "deleted") {
+        dropMessages(msg.ids || []);
+        return;
+      }
+
       if (msg.type === "message" || msg.type === "media") {
-        mergeMessages([await materialise(msg)]);
+        const rendered = await materialise(msg);
+        if (msg.is_system) rendered.type = "system";
+        mergeMessages([rendered]);
 
         // A message that lands while this chat is on screen has been read the
         // moment it arrives, so acknowledge it rather than leaving it stuck on
         // "delivered" until the user navigates away and back.
-        if (msg.from !== currentUser() && document.visibilityState === "visible") {
+        if (
+          !msg.is_system &&
+          msg.from !== currentUser() &&
+          document.visibilityState === "visible"
+        ) {
           chatSocket.send({ type: "seen", chat_id: chatIdRef.current });
         }
       }
@@ -152,7 +189,7 @@ export function useChat({ chatId, encrypted = false, privateKey = null, recipien
       offMessage();
       offStatus();
     };
-  }, [load, materialise, mergeMessages]);
+  }, [load, materialise, mergeMessages, dropMessages]);
 
   // Mark as read whenever this chat is opened.
   useEffect(() => {

@@ -21,6 +21,8 @@ type Config struct {
 	VAPIDPublicKey  string
 	VAPIDPrivateKey string
 	VAPIDSubject    string
+	ExpoPushEnabled bool
+	ExpoAccessToken string
 	AdminUsername   string
 	AdminPassword   string
 	AdminEmail      string
@@ -37,6 +39,21 @@ func env(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+// envBool reads a boolean flag, treating an unset value as the fallback. Any
+// of 1/t/true/y/yes (case-insensitive) is true; anything else is false.
+func envBool(key string, fallback bool) bool {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return fallback
+	}
+	switch strings.ToLower(v) {
+	case "1", "t", "true", "y", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 // Load resolves configuration from the environment. It is fatal for a
@@ -75,6 +92,8 @@ func Load() {
 		VAPIDPublicKey:  os.Getenv("VAPID_PUBLIC_KEY"),
 		VAPIDPrivateKey: os.Getenv("VAPID_PRIVATE_KEY"),
 		VAPIDSubject:    vapidSubject(),
+		ExpoPushEnabled: envBool("EXPO_PUSH_ENABLED", true),
+		ExpoAccessToken: os.Getenv("EXPO_ACCESS_TOKEN"),
 		AdminUsername:   os.Getenv("ADMIN_USERNAME"),
 		AdminPassword:   os.Getenv("ADMIN_PASSWORD"),
 		AdminEmail:      os.Getenv("ADMIN_EMAIL"),

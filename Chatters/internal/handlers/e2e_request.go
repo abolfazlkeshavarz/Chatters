@@ -5,96 +5,80 @@ import (
 	"net/http"
 
 	"messenger/internal/db"
-	"messenger/internal/push"
-	"messenger/internal/websocket"
 
 	"github.com/gin-gonic/gin"
+	"github.com/lib/pq"
 )
 
-// RequestChatE2E starts the consent handshake for turning a chat into an
-// end-to-end encrypted one. It no longer flips encryption on by itself — that
-// used to let either member silently upgrade a conversation the other side
-// never agreed to. Now it only records that a request is pending and notifies
-// the other member(s), who must explicitly accept.
-func RequestChatE2E(c *gin.Context) {
-	chatID := c.Param("id")
-	userID := c.GetString("user_id")
+// Secret chats replaced the old "encrypt this chat in place" handshake. A
+// request now creates a dedicated pending 1:1 chat (see CreateSecretChat);
+// these handlers drive that chat's lifecycle.
 
-	if !isChatMember(chatID, userID) {
+// RequestChatE2E is the compatibility entry point kept for the "🔒" button
+// inside a normal 1:1 chat: it starts a secret chat with the OTHER member of
+// chat :id instead of upgrading that chat.
+func RequestChatE2E(c *gin.Context) {
+	sourceChatID := c.Param("id")
+	me := c.GetString("user_id")
+
+	if !isChatMember(sourceChatID, me) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "not a chat member"})
 		return
 	}
 
-	var status string
-	var enabled bool
-	if err := db.DB.QueryRow(
-		`SELECT e2e_status, e2e_enabled FROM chats WHERE id = $1`, chatID,
-	).Scan(&status, &enabled); err != nil {
+	var isGroup bool
+	var members []string
+	if err := db.DB.QueryRow(`SELECT c.is_group FROM chats c WHERE c.id = $1`, sourceChatID).Scan(&isGroup); err != nil {
 		c.JSON(http.StatusNotFound, gin.H{"error": "chat not found"})
 		return
 	}
-	if enabled || status == "accepted" {
-		c.JSON(http.StatusConflict, gin.H{"error": "this chat is already encrypted"})
-		return
-	}
-	if status == "pending" {
-		c.JSON(http.StatusConflict, gin.H{"error": "a request is already pending"})
+	if isGroup {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "secret chats are one-to-one only"})
 		return
 	}
 
-	// Every member needs a published public key or some of them would be
-	// unable to read anything sent after acceptance.
-	if without, err := membersWithoutKeys(chatID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify member keys"})
-		return
-	} else if without > 0 {
-		c.JSON(http.StatusConflict, gin.H{
-			"error": "every member must sign in once to publish an encryption key before this chat can be secured",
-		})
+	rows, _ := db.DB.Query(`SELECT user_id FROM chat_members WHERE chat_id = $1`, sourceChatID)
+	if rows != nil {
+		for rows.Next() {
+			var u string
+			if rows.Scan(&u) == nil {
+				members = append(members, u)
+			}
+		}
+		rows.Close()
+	}
+
+	var peer string
+	for _, m := range members {
+		if m != me {
+			peer = m
+		}
+	}
+	if peer == "" {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "could not identify the other member"})
 		return
 	}
 
-	res, err := db.DB.Exec(
-		`UPDATE chats SET e2e_status = 'pending', e2e_requested_by = $1, e2e_requested_at = now()
-		 WHERE id = $2 AND e2e_status = 'none'`,
-		userID, chatID,
-	)
-	if err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to request encryption"})
+	chatID, status, code, errMsg := startSecretChat(me, peer)
+	if errMsg != "" {
+		c.JSON(code, gin.H{"error": errMsg})
 		return
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		c.JSON(http.StatusConflict, gin.H{"error": "a request is already pending"})
-		return
-	}
-
-	notifyE2EState(chatID, userID, "e2e_request")
-	c.JSON(http.StatusOK, gin.H{"status": "pending"})
+	c.JSON(http.StatusOK, gin.H{"chat_id": chatID, "status": status})
 }
 
-// AcceptChatE2E completes the handshake: only a member who did not send the
-// request may accept it, which is what makes this consent rather than a
-// second way to trigger the same unilateral switch.
+// AcceptChatE2E completes the handshake on secret chat :id. Only the member
+// who did NOT send the request may accept.
 func AcceptChatE2E(c *gin.Context) {
 	chatID := c.Param("id")
-	userID := c.GetString("user_id")
+	me := c.GetString("user_id")
 
-	requestedBy, ok := pendingRequester(c, chatID, userID)
+	requestedBy, ok := pendingRequester(c, chatID, me)
 	if !ok {
 		return
 	}
-	if requestedBy == userID {
+	if requestedBy == me {
 		c.JSON(http.StatusConflict, gin.H{"error": "you cannot accept your own request"})
-		return
-	}
-
-	if without, err := membersWithoutKeys(chatID); err != nil {
-		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to verify member keys"})
-		return
-	} else if without > 0 {
-		c.JSON(http.StatusConflict, gin.H{
-			"error": "every member must sign in once to publish an encryption key before this chat can be secured",
-		})
 		return
 	}
 
@@ -112,40 +96,109 @@ func AcceptChatE2E(c *gin.Context) {
 		return
 	}
 
-	notifyE2EState(chatID, userID, "e2e_accepted")
-	c.JSON(http.StatusOK, gin.H{"status": "ok", "e2e_enabled": true})
+	notifySecretChatState(chatID, me, "e2e_accepted")
+	c.JSON(http.StatusOK, gin.H{"status": "ok", "e2e_enabled": true, "chat_id": chatID})
 }
 
-// RejectChatE2E cancels a pending request. The chat reverts to normal, and can
-// be requested again later.
+// RejectChatE2E declines secret chat :id. The pending chat is removed for both
+// sides.
 func RejectChatE2E(c *gin.Context) {
 	chatID := c.Param("id")
-	userID := c.GetString("user_id")
+	me := c.GetString("user_id")
 
-	requestedBy, ok := pendingRequester(c, chatID, userID)
+	requestedBy, ok := pendingRequester(c, chatID, me)
 	if !ok {
 		return
 	}
-	if requestedBy == userID {
-		c.JSON(http.StatusConflict, gin.H{"error": "you cannot reject your own request; it will simply expire unanswered"})
+	if requestedBy == me {
+		c.JSON(http.StatusConflict, gin.H{"error": "you cannot reject your own request"})
 		return
 	}
 
-	if _, err := db.DB.Exec(
-		`UPDATE chats SET e2e_status = 'none', e2e_requested_by = NULL, e2e_requested_at = NULL
-		 WHERE id = $1 AND e2e_status = 'pending'`,
-		chatID,
-	); err != nil {
+	// Tell everyone first, while the chat (and its membership rows) still
+	// exist, then drop it.
+	notifySecretChatState(chatID, me, "e2e_rejected")
+
+	if _, err := db.DB.Exec(`DELETE FROM chats WHERE id = $1 AND e2e_status = 'pending'`, chatID); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to reject request"})
 		return
 	}
 
-	notifyE2EState(chatID, userID, "e2e_rejected")
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
-// pendingRequester validates chat membership and a pending request, writing
-// an error response and returning ok=false if either check fails.
+// startSecretChat creates (or returns) a pending secret chat between two users.
+// Shared by CreateSecretChat (called with an explicit peer) and RequestChatE2E
+// (peer derived from a 1:1 chat). Returns an HTTP status + message on failure.
+func startSecretChat(me, peer string) (chatID, status string, code int, errMsg string) {
+	if peer == me {
+		return "", "", http.StatusBadRequest, "you cannot start a secret chat with yourself"
+	}
+
+	var keyed int
+	if err := db.DB.QueryRow(
+		`SELECT COUNT(*) FROM users
+		 WHERE id IN ($1, $2) AND public_key IS NOT NULL AND public_key <> ''`,
+		me, peer,
+	).Scan(&keyed); err != nil {
+		return "", "", http.StatusInternalServerError, "failed to verify keys"
+	}
+	if keyed < 2 {
+		return "", "", http.StatusConflict,
+			"both people must sign in once to publish an encryption key before a secret chat can start"
+	}
+
+	var existing string
+	err := db.DB.QueryRow(
+		`SELECT c.id
+		   FROM chats c
+		   JOIN chat_members a ON a.chat_id = c.id AND a.user_id = $1
+		   JOIN chat_members b ON b.chat_id = c.id AND b.user_id = $2
+		  WHERE c.is_secret
+		    AND (SELECT COUNT(*) FROM chat_members m WHERE m.chat_id = c.id) = 2
+		  LIMIT 1`,
+		me, peer,
+	).Scan(&existing)
+	if err == nil && existing != "" {
+		return existing, "existing", http.StatusOK, ""
+	}
+
+	tx, err := db.DB.Begin()
+	if err != nil {
+		return "", "", http.StatusInternalServerError, "db error"
+	}
+	defer tx.Rollback()
+
+	err = tx.QueryRow(
+		`INSERT INTO chats (is_group, is_secret, e2e_enabled, e2e_status, e2e_requested_by, e2e_requested_at)
+		 VALUES (false, true, false, 'pending', $1, now())
+		 RETURNING id`,
+		me,
+	).Scan(&chatID)
+	if err != nil {
+		return "", "", http.StatusInternalServerError, "failed to create secret chat"
+	}
+
+	if _, err = tx.Exec(
+		`INSERT INTO chat_members (chat_id, user_id) SELECT $1, unnest($2::text[])`,
+		chatID, pq.Array([]string{me, peer}),
+	); err != nil {
+		if isForeignKeyViolation(err) {
+			return "", "", http.StatusBadRequest, "that user does not exist"
+		}
+		return "", "", http.StatusInternalServerError, "failed to add members"
+	}
+
+	if err = tx.Commit(); err != nil {
+		return "", "", http.StatusInternalServerError, "commit failed"
+	}
+
+	notifySecretChatState(chatID, me, "e2e_request")
+	return chatID, "pending", http.StatusOK, ""
+}
+
+// pendingRequester validates chat membership and that a pending request exists,
+// writing an error response and returning ok=false if either check fails.
 func pendingRequester(c *gin.Context, chatID, userID string) (requestedBy string, ok bool) {
 	if !isChatMember(chatID, userID) {
 		c.JSON(http.StatusForbidden, gin.H{"error": "not a chat member"})
@@ -166,56 +219,6 @@ func pendingRequester(c *gin.Context, chatID, userID string) (requestedBy string
 	}
 
 	return by.String, true
-}
-
-func membersWithoutKeys(chatID string) (int, error) {
-	var n int
-	err := db.DB.QueryRow(
-		`SELECT COUNT(*)
-		 FROM chat_members cm
-		 JOIN users u ON u.id = cm.user_id
-		 WHERE cm.chat_id = $1 AND (u.public_key IS NULL OR u.public_key = '')`,
-		chatID,
-	).Scan(&n)
-	return n, err
-}
-
-// notifyE2EState pushes the state change over the live socket to every member
-// (including the actor, so their other open tabs/devices update too) and, for
-// the request itself, wakes up an offline recipient. Acceptance and rejection
-// are not pushed to offline devices — they will see the current state next
-// time they open the chat, and a push notification would arrive after the
-// action is already resolved.
-func notifyE2EState(chatID, actor, eventType string) {
-	if websocket.GlobalHub == nil {
-		return
-	}
-
-	websocket.GlobalHub.BroadcastEvent(chatID, map[string]interface{}{
-		"type":    eventType,
-		"chat_id": chatID,
-		"by":      actor,
-	})
-
-	if eventType != "e2e_request" || !push.Enabled() {
-		return
-	}
-
-	members := chatMembersList(chatID)
-	for _, userID := range members {
-		if userID == actor || websocket.GlobalHub.IsOnline(userID) {
-			continue
-		}
-		// An E2E request needs a decision, so unlike a muted chat's regular
-		// messages it is always pushed.
-		push.SendToUser(userID, push.Notification{
-			Type:   "e2e_request",
-			Title:  actor,
-			Body:   "wants to start an end-to-end encrypted chat",
-			ChatID: chatID,
-			From:   actor,
-		})
-	}
 }
 
 func chatMembersList(chatID string) []string {

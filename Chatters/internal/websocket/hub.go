@@ -48,6 +48,7 @@ type ChatMessage struct {
 	From      string `json:"from"`
 	Content   string `json:"content"`
 	CreatedAt string `json:"created_at"`
+	ExpiresAt string `json:"expires_at,omitempty"`
 	Status    string `json:"status"`
 	Filename  string `json:"filename,omitempty"`
 	MimeType  string `json:"mime_type,omitempty"`
@@ -196,9 +197,10 @@ func (h *Hub) handleIncoming(msg ChatMessage) {
 	// message is in — see pushToOffline.
 	var e2eEnabled, isGroup bool
 	var chatName sql.NullString
+	var selfDestruct int
 	if err := db.DB.QueryRow(
-		`SELECT e2e_enabled, is_group, name FROM chats WHERE id = $1`, msg.ChatID,
-	).Scan(&e2eEnabled, &isGroup, &chatName); err != nil {
+		`SELECT e2e_enabled, is_group, name, self_destruct_seconds FROM chats WHERE id = $1`, msg.ChatID,
+	).Scan(&e2eEnabled, &isGroup, &chatName, &selfDestruct); err != nil {
 		return
 	}
 	if e2eEnabled != msg.IsEncrypted {
@@ -210,7 +212,7 @@ func (h *Hub) handleIncoming(msg ChatMessage) {
 		return
 	}
 
-	id, createdAt, err := h.persist(msg, members)
+	id, createdAt, expiresAt, err := h.persist(msg, members, selfDestruct)
 	if err != nil {
 		log.Printf("websocket: failed to persist message: %v", err)
 		return
@@ -227,6 +229,9 @@ func (h *Hub) handleIncoming(msg ChatMessage) {
 		ReplyTo:     msg.ReplyTo,
 		IsEncrypted: msg.IsEncrypted,
 		CipherIV:    msg.CipherIV,
+	}
+	if !expiresAt.IsZero() {
+		out.ExpiresAt = expiresAt.Format(time.RFC3339Nano)
 	}
 
 	// A connected recipient has received the message, but being connected is
@@ -276,24 +281,28 @@ func (h *Hub) handleIncoming(msg ChatMessage) {
 
 // persist writes the message and, for encrypted chats, one wrapped key row per
 // recipient in the same transaction.
-func (h *Hub) persist(msg ChatMessage, members []string) (int, time.Time, error) {
+func (h *Hub) persist(msg ChatMessage, members []string, selfDestructSeconds int) (int, time.Time, time.Time, error) {
 	tx, err := db.DB.Begin()
 	if err != nil {
-		return 0, time.Time{}, err
+		return 0, time.Time{}, time.Time{}, err
 	}
 	defer tx.Rollback()
 
 	var id int
 	var createdAt time.Time
+	var expiresAt sql.NullTime
 
+	// A self-destruct timer on the chat stamps every new message with a hard
+	// expiry; a background sweep deletes them and tells open clients.
 	err = tx.QueryRow(
-		`INSERT INTO messages (chat_id, sender_id, content, reply_to, is_encrypted, cipher_iv)
-		 VALUES ($1, $2, $3, $4, $5, NULLIF($6,''))
-		 RETURNING id, created_at`,
-		msg.ChatID, msg.From, msg.Content, msg.ReplyTo, msg.IsEncrypted, msg.CipherIV,
-	).Scan(&id, &createdAt)
+		`INSERT INTO messages (chat_id, sender_id, content, reply_to, is_encrypted, cipher_iv, expires_at)
+		 VALUES ($1, $2, $3, $4, $5, NULLIF($6,''),
+		         CASE WHEN $7::int > 0 THEN now() + ($7 || ' seconds')::interval ELSE NULL END)
+		 RETURNING id, created_at, expires_at`,
+		msg.ChatID, msg.From, msg.Content, msg.ReplyTo, msg.IsEncrypted, msg.CipherIV, selfDestructSeconds,
+	).Scan(&id, &createdAt, &expiresAt)
 	if err != nil {
-		return 0, time.Time{}, err
+		return 0, time.Time{}, time.Time{}, err
 	}
 
 	if msg.IsEncrypted {
@@ -312,15 +321,15 @@ func (h *Hub) persist(msg ChatMessage, members []string) (int, time.Time, error)
 				 ON CONFLICT (message_id, user_id) DO NOTHING`,
 				id, k.UserID, k.WrappedKey, k.WrapIV, k.EphemeralPub,
 			); err != nil {
-				return 0, time.Time{}, err
+				return 0, time.Time{}, time.Time{}, err
 			}
 		}
 	}
 
 	if err := tx.Commit(); err != nil {
-		return 0, time.Time{}, err
+		return 0, time.Time{}, time.Time{}, err
 	}
-	return id, createdAt, nil
+	return id, createdAt, expiresAt.Time, nil
 }
 
 // pushToOffline wakes up recipients who have no live socket. Encrypted chats
@@ -336,7 +345,7 @@ func (h *Hub) persist(msg ChatMessage, members []string) (int, time.Time, error)
 // direct chat still leads with the sender, since there is only the one
 // person it could be.
 func (h *Hub) pushToOffline(msg ChatMessage, members []string, isGroup bool, chatName string) {
-	if !push.Enabled() {
+	if !push.Active() {
 		return
 	}
 
@@ -368,7 +377,7 @@ func (h *Hub) pushToOffline(msg ChatMessage, members []string, isGroup bool, cha
 		if userID == msg.From || h.IsOnline(userID) || db.IsChatMuted(msg.ChatID, userID) {
 			continue
 		}
-		push.SendToUser(userID, n)
+		push.Notify(userID, n)
 	}
 }
 
@@ -396,7 +405,8 @@ func (h *Hub) BroadcastStatus(chatID, status string, messageIDs []int) {
 
 // BroadcastEvent sends an arbitrary JSON event to every member of a chat.
 // Used for state changes that are not a chat message — an E2E encryption
-// request, its acceptance or rejection.
+// request, its acceptance or rejection, a self-destruct timer change, a
+// "delete for everyone".
 func (h *Hub) BroadcastEvent(chatID string, payload map[string]interface{}) {
 	data, err := json.Marshal(payload)
 	if err != nil {
@@ -405,6 +415,30 @@ func (h *Hub) BroadcastEvent(chatID string, payload map[string]interface{}) {
 	for _, userID := range h.chatMembers(chatID) {
 		h.dispatch(userID, data)
 	}
+}
+
+// BroadcastEventToMembers is BroadcastEvent for a caller that already knows the
+// member list (e.g. just before the chat row — and its chat_members — are
+// deleted).
+func (h *Hub) BroadcastEventToMembers(members []string, payload map[string]interface{}) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	for _, userID := range members {
+		h.dispatch(userID, data)
+	}
+}
+
+// NotifyUser sends an event to every connection one user has — used for
+// actions that only concern that user, such as "delete for me", so their other
+// devices stay in sync.
+func (h *Hub) NotifyUser(userID string, payload map[string]interface{}) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	h.dispatch(userID, data)
 }
 
 // MarkDelivered advances every message still awaiting delivery to this user,

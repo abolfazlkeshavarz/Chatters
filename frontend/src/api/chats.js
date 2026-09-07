@@ -16,6 +16,30 @@ export function createChat(members, isGroup, name) {
   });
 }
 
+/**
+ * Start (or reopen) a Telegram-style secret chat with one user. Unlike the old
+ * in-place upgrade this creates a separate 1:1 chat, pending until the other
+ * person accepts.
+ */
+export function createSecretChat(userId) {
+  return api.post("/api/secret-chats", { user_id: userId });
+}
+
+/** Change a secret chat's self-destruct timer (seconds; 0 = off). */
+export function setSelfDestruct(chatId, seconds) {
+  return api.put(`/api/chats/${encodeURIComponent(chatId)}/self-destruct`, {
+    seconds,
+  });
+}
+
+/**
+ * Delete a chat. scope "me" leaves it / drops it from your list; scope
+ * "everyone" removes a one-to-one or secret chat for both sides.
+ */
+export function deleteChat(chatId, scope = "me") {
+  return api.del(`/api/chats/${encodeURIComponent(chatId)}`, { scope });
+}
+
 export function getChatMembers(chatId) {
   return api.get(`/api/chats/${encodeURIComponent(chatId)}/members`);
 }

@@ -133,6 +133,10 @@ func main() {
 	// 🔌 WebSocket hub
 	hub := websocket.NewHub()
 	go hub.Run()
+
+	// Self-destruct timer sweep: deletes expired secret-chat messages and tells
+	// open clients. Short interval so a 5-second timer actually feels like one.
+	websocket.StartExpirySweep(context.Background(), hub, 5*time.Second)
 	// A no-op without Redis; with it, this is what lets a message reach a
 	// recipient connected to a different backend replica.
 	go hub.StartPubSub(context.Background())
@@ -152,6 +156,7 @@ func main() {
 
 		protected.GET("/chats", handlers.GetChats)
 		protected.POST("/chats", handlers.CreateChat)
+		protected.DELETE("/chats/:id", handlers.DeleteChat)
 		protected.GET("/chats/:id/messages", handlers.GetMessages)
 		protected.GET("/chats/:id/members", handlers.GetChatMembers)
 		protected.POST("/chats/:id/members", handlers.AddMember)
@@ -159,7 +164,11 @@ func main() {
 		protected.POST("/chats/:id/e2e/request", handlers.RequestChatE2E)
 		protected.POST("/chats/:id/e2e/accept", handlers.AcceptChatE2E)
 		protected.POST("/chats/:id/e2e/reject", handlers.RejectChatE2E)
+		protected.PUT("/chats/:id/self-destruct", handlers.SetSelfDestruct)
 		protected.PUT("/chats/:id/mute", handlers.SetChatMute)
+
+		protected.POST("/secret-chats", handlers.CreateSecretChat)
+		protected.DELETE("/messages/:id", handlers.DeleteMessage)
 
 		protected.PUT("/profile/username", handlers.ChangeUsername)
 		protected.PUT("/profile/password", handlers.ChangePassword)
@@ -177,6 +186,8 @@ func main() {
 		protected.GET("/push/vapid-public-key", handlers.PushPublicKey)
 		protected.POST("/push/subscribe", handlers.Subscribe)
 		protected.POST("/push/unsubscribe", handlers.Unsubscribe)
+		protected.POST("/push/device", handlers.RegisterDevice)
+		protected.POST("/push/device/unregister", handlers.UnregisterDevice)
 
 		admin := protected.Group("/admin", middleware.AdminMiddleware())
 		{
@@ -190,6 +201,11 @@ func main() {
 			admin.GET("/settings/e2e-retention", handlers.AdminGetE2ERetention)
 			admin.PUT("/settings/e2e-retention", handlers.AdminSetE2ERetention)
 			admin.POST("/e2e/purge-now", handlers.AdminPurgeE2EMessages)
+
+			admin.GET("/chats", handlers.AdminListChats)
+			admin.GET("/chats/:id/messages", handlers.AdminGetChatMessages)
+			admin.DELETE("/chats/:id", handlers.AdminDeleteChat)
+			admin.DELETE("/messages/:id", handlers.AdminDeleteMessage)
 		}
 	}
 

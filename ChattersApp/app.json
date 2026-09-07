@@ -1,0 +1,66 @@
+{
+  "expo": {
+    "name": "Chatters",
+    "slug": "chatters-app",
+    "scheme": "chatters",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#0b0c10"
+    },
+    "assetBundlePatterns": ["**/*"],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.chatters.app",
+      "infoPlist": {
+        "NSPhotoLibraryUsageDescription": "Chatters needs access to your photos so you can send images in chats and set a profile photo.",
+        "NSCameraUsageDescription": "Chatters needs camera access so you can take a photo to send or use as your profile picture.",
+        "UIBackgroundModes": ["remote-notification"],
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.chatters.app",
+      "adaptiveIcon": {
+        "backgroundColor": "#0b0c10"
+      },
+      "permissions": [
+        "INTERNET",
+        "POST_NOTIFICATIONS",
+        "READ_MEDIA_IMAGES",
+        "VIBRATE"
+      ],
+      "blockedPermissions": ["android.permission.RECORD_AUDIO"]
+    },
+    "plugins": [
+      "expo-secure-store",
+      "expo-dev-client",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Chatters accesses your photos to let you share images and set a profile picture."
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": { "minSdkVersion": 24 },
+          "ios": { "deploymentTarget": "15.1" }
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#2f6fed"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": { "projectId": "REPLACE_WITH_EAS_PROJECT_ID" },
+      "apiBase": "https://chatters.example.com"
+    }
+  }
+}
