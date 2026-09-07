@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { fetchMediaURL } from "../api/media";
+import { getMediaURL, downloadMedia } from "../api/media";
 import ImageModal from "./ImageModal";
 
 function formatTime(ts) {
@@ -37,14 +37,214 @@ function SelfDestructBadge({ expiresAt, now }) {
   return <span title="Self-destructs after sending"> · 🔥 {label}</span>;
 }
 
-function isImage(m) {
-  if (m.mime_type) return m.mime_type.startsWith("image/");
+/** image | video | file — from the mime type, with a filename-extension fallback. */
+function mediaKind(m) {
+  const mime = m.mime_type || "";
+  if (mime.startsWith("image/")) return "image";
+  if (mime.startsWith("video/")) return "video";
   const name = m.filename || m.content || "";
-  return /\.(jpe?g|png|gif|bmp|webp|avif)$/i.test(name);
+  if (/\.(jpe?g|png|gif|bmp|webp|avif|heic)$/i.test(name)) return "image";
+  if (/\.(mp4|webm|mov|m4v|ogv|mkv)$/i.test(name)) return "video";
+  return "file";
+}
+
+function formatBytes(n) {
+  if (!Number.isFinite(n) || n <= 0) return "";
+  const units = ["B", "KB", "MB", "GB"];
+  let v = n;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${units[i]}`;
+}
+
+/** Circular upload/download progress indicator drawn over a thumbnail. */
+function ProgressRing({ value }) {
+  const r = 17;
+  const circ = 2 * Math.PI * r;
+  const clamped = Math.max(0, Math.min(100, value || 0));
+  return (
+    <svg width="42" height="42" viewBox="0 0 42 42" aria-hidden="true">
+      <circle cx="21" cy="21" r={r} fill="rgba(0,0,0,0.45)" stroke="rgba(255,255,255,0.3)" strokeWidth="3" />
+      <circle
+        cx="21"
+        cy="21"
+        r={r}
+        fill="none"
+        stroke="#fff"
+        strokeWidth="3"
+        strokeLinecap="round"
+        strokeDasharray={circ}
+        strokeDashoffset={circ * (1 - clamped / 100)}
+        transform="rotate(-90 21 21)"
+      />
+      <text x="21" y="24.5" textAnchor="middle" fontSize="9" fill="#fff">
+        {Math.round(clamped)}
+      </text>
+    </svg>
+  );
+}
+
+/**
+ * One attachment in a bubble. Images load themselves (they are small); video
+ * loads on tap so a scroll-back does not pull every clip down at once. An
+ * upload still in flight shows its own local preview with a progress ring.
+ */
+function MediaAttachment({ message, onOpen, onDownload, onRetry }) {
+  const kind = mediaKind(message);
+  const label = message.filename || message.content || "attachment";
+  const hasServerId =
+    typeof message.id === "number" && !message.pending && !message.failed;
+
+  const [url, setUrl] = useState(message._localURL || null);
+  const [loading, setLoading] = useState(false);
+  const [failed, setFailed] = useState(false);
+  const [videoOpen, setVideoOpen] = useState(
+    kind === "video" && Boolean(message._localURL)
+  );
+
+  useEffect(() => {
+    if (message._localURL) {
+      setUrl(message._localURL);
+      return undefined;
+    }
+    // Only images auto-fetch; video waits for a tap.
+    if (kind !== "image" || !hasServerId) return undefined;
+
+    let alive = true;
+    setLoading(true);
+    setFailed(false);
+    getMediaURL(message.id)
+      .then((u) => alive && setUrl(u))
+      .catch(() => alive && setFailed(true))
+      .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [message.id, message._localURL, kind, hasServerId]);
+
+  async function loadVideo() {
+    if (url) {
+      setVideoOpen(true);
+      return;
+    }
+    if (!hasServerId) return;
+    setLoading(true);
+    setFailed(false);
+    try {
+      setUrl(await getMediaURL(message.id));
+      setVideoOpen(true);
+    } catch {
+      setFailed(true);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (message.failed) {
+    return (
+      <div style={styles.mediaFailed}>
+        <span>⚠️ Upload failed — {label}</span>
+        {onRetry && (
+          <button style={styles.retryBtn} onClick={() => onRetry(message)}>
+            Retry
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  if (kind === "image") {
+    return (
+      <div style={styles.mediaWrap}>
+        {url ? (
+          <img
+            src={url}
+            alt={label}
+            style={styles.mediaThumb}
+            onClick={() => onOpen({ url, filename: label, kind })}
+          />
+        ) : (
+          <div style={styles.mediaPlaceholder}>
+            {failed ? "🖼️ failed to load" : <span className="spinner" />}
+          </div>
+        )}
+        {message.pending && (
+          <div style={styles.mediaOverlay}>
+            <ProgressRing value={message.progress} />
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  if (kind === "video") {
+    return (
+      <div style={styles.mediaWrap}>
+        {videoOpen && url ? (
+          <video
+            src={url}
+            style={styles.mediaThumb}
+            controls
+            playsInline
+            preload="metadata"
+            autoPlay={!message.pending}
+            muted={message.pending}
+          />
+        ) : (
+          <button style={styles.mediaPlaceholder} onClick={loadVideo}>
+            {loading ? (
+              <span className="spinner" />
+            ) : (
+              <>
+                <span style={styles.playGlyph}>▶</span>
+                <span style={styles.mediaHint}>
+                  {failed ? "tap to retry" : "Video"}
+                </span>
+              </>
+            )}
+          </button>
+        )}
+        {message.pending && (
+          <div style={styles.mediaOverlay}>
+            <ProgressRing value={message.progress} />
+          </div>
+        )}
+        {videoOpen && url && (
+          <button
+            style={styles.expandBtn}
+            aria-label="Fullscreen"
+            onClick={() => onOpen({ url, filename: label, kind })}
+          >
+            ⤢
+          </button>
+        )}
+      </div>
+    );
+  }
+
+  // Generic file.
+  return (
+    <div style={styles.fileRow}>
+      <button
+        style={styles.fileButton}
+        onClick={() => (message.pending ? null : onDownload(message))}
+        disabled={message.pending}
+      >
+        📎 <span>{label}</span>
+        {message._size ? (
+          <span style={styles.fileMeta}>{formatBytes(message._size)}</span>
+        ) : null}
+      </button>
+      {message.pending && <ProgressRing value={message.progress} />}
+    </div>
+  );
 }
 
 /** Body of a message, accounting for attachments and encryption failures. */
-function MessageBody({ message, onOpenImage, onDownload }) {
+function MessageBody({ message, onOpen, onDownload, onRetry }) {
   if (message.decryptError === "locked") {
     return <em style={styles.systemNote}>🔒 Unlock secure chat to read this message</em>;
   }
@@ -57,22 +257,13 @@ function MessageBody({ message, onOpenImage, onDownload }) {
   }
 
   if (isMedia(message)) {
-    const label = message.filename || message.content || "attachment";
-
-    if (isImage(message)) {
-      return (
-        <button style={styles.imageButton} onClick={() => onOpenImage(message)}>
-          <span style={styles.imageThumb}>🖼️</span>
-          <span style={styles.imageLabel}>{label}</span>
-          <span style={styles.imageHint}>Tap to view</span>
-        </button>
-      );
-    }
-
     return (
-      <button style={styles.fileButton} onClick={() => onDownload(message)}>
-        📎 {label}
-      </button>
+      <MediaAttachment
+        message={message}
+        onOpen={onOpen}
+        onDownload={onDownload}
+        onRetry={onRetry}
+      />
     );
   }
 
@@ -88,6 +279,7 @@ export default function MessageList({
   me,
   onReply,
   onDelete,
+  onRetryMedia,
   secure = false,
 }) {
   const bottomRef = useRef(null);
@@ -130,30 +322,15 @@ export default function MessageList({
     clearTimeout(holdTimer.current);
   }
 
-  async function openImage(message) {
-    try {
-      const url = await fetchMediaURL(message.id);
-      setPreview({ url, filename: message.filename || message.content });
-    } catch {
-      alert("نمایش عکس ناموفق بود");
-    }
-  }
-
   function closePreview() {
-    if (preview) URL.revokeObjectURL(preview.url);
+    // The URL is either a cached blob (owned by the media cache) or a local
+    // preview (owned by useChat) — never revoke it here.
     setPreview(null);
   }
 
   async function download(message) {
     try {
-      const url = await fetchMediaURL(message.id);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = message.filename || message.content || "file";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      await downloadMedia(message.id, message.filename || message.content || "file");
     } catch {
       alert("دانلود فایل ناموفق بود");
     }
@@ -207,11 +384,12 @@ export default function MessageList({
         <ImageModal
           imageUrl={preview.url}
           filename={preview.filename}
+          isVideo={preview.kind === "video"}
           onClose={closePreview}
           onDownload={() => {
             const a = document.createElement("a");
             a.href = preview.url;
-            a.download = preview.filename || "image";
+            a.download = preview.filename || "file";
             document.body.appendChild(a);
             a.click();
             a.remove();
@@ -269,6 +447,7 @@ export default function MessageList({
                         color: "var(--bubble-in-text)",
                         borderColor: "transparent",
                       }),
+                  ...(m.pending ? styles.bubblePending : null),
                 }}
               >
                 {!mine && <div style={styles.sender}>{m.from}</div>}
@@ -286,13 +465,16 @@ export default function MessageList({
 
                 <MessageBody
                   message={m}
-                  onOpenImage={openImage}
+                  onOpen={setPreview}
                   onDownload={download}
+                  onRetry={onRetryMedia}
                 />
 
                 <div style={styles.meta}>
                   {secure && <span title="End-to-end encrypted">🔒 </span>}
-                  {formatTime(m.created_at)}
+                  {m.pending
+                    ? `Uploading… ${Math.round(m.progress || 0)}%`
+                    : formatTime(m.created_at)}
                   {m.expires_at && (
                     <SelfDestructBadge expiresAt={m.expires_at} now={now} />
                   )}
@@ -304,7 +486,7 @@ export default function MessageList({
                   )}
                 </div>
 
-                {heldId === m.id && (
+                {heldId === m.id && !m.pending && !m.failed && (
                   <div style={styles.actions}>
                     <button
                       style={styles.action}
@@ -318,6 +500,11 @@ export default function MessageList({
                     {!isMedia(m) && !m.decryptError && (
                       <button style={styles.action} onClick={() => copy(m)}>
                         📋 Copy
+                      </button>
+                    )}
+                    {isMedia(m) && !m.failed && (
+                      <button style={styles.action} onClick={() => download(m)}>
+                        📥 Save
                       </button>
                     )}
                     {onDelete && (
@@ -396,6 +583,7 @@ const styles = {
     // bubble does not change size as it moves from sent to delivered.
     border: "1px solid transparent",
   },
+  bubblePending: { opacity: 0.85 },
   sender: { fontSize: 12, fontWeight: 700, opacity: 0.85, marginBottom: 4 },
   text: { lineHeight: 1.45, whiteSpace: "pre-wrap", textAlign: "start" },
   systemNote: { opacity: 0.85, fontSize: 13 },
@@ -422,23 +610,92 @@ const styles = {
   },
   actions: { display: "flex", gap: 8, marginTop: 6, flexWrap: "wrap" },
   action: { fontSize: 12, opacity: 0.85, color: "inherit", padding: "2px 4px" },
-  imageButton: {
+
+  // --- attachments ---
+  mediaWrap: {
+    position: "relative",
+    width: "min(66vw, 260px)",
+    borderRadius: 14,
+    overflow: "hidden",
+    background: "rgba(0,0,0,0.08)",
+    marginBottom: 2,
+  },
+  mediaThumb: {
+    display: "block",
+    width: "100%",
+    maxHeight: 320,
+    objectFit: "cover",
+    cursor: "pointer",
+    background: "#000",
+  },
+  mediaPlaceholder: {
+    width: "100%",
+    minHeight: 150,
     display: "flex",
     flexDirection: "column",
-    alignItems: "flex-start",
-    gap: 2,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 6,
     color: "inherit",
-    padding: 0,
-    textAlign: "start",
+    cursor: "pointer",
   },
-  imageThumb: { fontSize: 40 },
-  imageLabel: { fontSize: 13, wordBreak: "break-all" },
-  imageHint: { fontSize: 11, opacity: 0.75 },
+  mediaOverlay: {
+    position: "absolute",
+    inset: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "rgba(0,0,0,0.15)",
+  },
+  expandBtn: {
+    position: "absolute",
+    top: 6,
+    insetInlineEnd: 6,
+    width: 30,
+    height: 30,
+    borderRadius: "50%",
+    background: "rgba(0,0,0,0.55)",
+    color: "#fff",
+    fontSize: 14,
+    lineHeight: 1,
+  },
+  playGlyph: {
+    fontSize: 34,
+    width: 60,
+    height: 60,
+    borderRadius: "50%",
+    background: "rgba(0,0,0,0.5)",
+    color: "#fff",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  mediaHint: { fontSize: 12, opacity: 0.85 },
+  mediaFailed: {
+    display: "flex",
+    alignItems: "center",
+    gap: 8,
+    flexWrap: "wrap",
+    fontSize: 13,
+  },
+  retryBtn: {
+    fontSize: 12,
+    fontWeight: 700,
+    padding: "2px 10px",
+    borderRadius: 12,
+    background: "rgba(0,0,0,0.15)",
+    color: "inherit",
+  },
+  fileRow: { display: "flex", alignItems: "center", gap: 10 },
   fileButton: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
     color: "inherit",
     padding: 0,
     textAlign: "start",
     fontSize: "inherit",
     wordBreak: "break-all",
   },
+  fileMeta: { fontSize: 11, opacity: 0.7, whiteSpace: "nowrap" },
 };

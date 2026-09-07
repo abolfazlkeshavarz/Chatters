@@ -1,6 +1,5 @@
 import { useState } from "react";
 import { useChat } from "../hooks/useChat";
-import { uploadMedia } from "../api/media";
 import { createSecretChat, setChatMute } from "../api/chats";
 import { deleteMessage } from "../api/messages";
 import Avatar from "../components/Avatar";
@@ -23,16 +22,26 @@ export default function Chat({ chatId, title, chat, onBack, onChatPatch, onOpenC
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
-  const { messages, status, error: chatError, setError: setChatError, send } = useChat({ chatId });
+  const {
+    messages,
+    status,
+    error: chatError,
+    setError: setChatError,
+    send,
+    sendMedia,
+    retryMedia,
+  } = useChat({ chatId });
 
   const otherMember = (chat?.members || []).find((m) => m !== me);
 
-  async function handleAttach(file) {
-    try {
-      await uploadMedia(chatId, file);
-    } catch (err) {
-      setChatError(err.message || "آپلود فایل ناموفق بود");
+  // sendMedia manages its own optimistic bubble and per-file progress, so all
+  // this has to do is fan a multi-select out into one upload each.
+  function handleAttach(files) {
+    const list = Array.isArray(files) ? files : [files];
+    for (const file of list) {
+      if (file) sendMedia(file, replyTo?.id);
     }
+    setReplyTo(null);
   }
 
   async function handleSend(text) {
@@ -146,6 +155,7 @@ export default function Chat({ chatId, title, chat, onBack, onChatPatch, onOpenC
         me={me}
         onReply={setReplyTo}
         onDelete={handleDelete}
+        onRetryMedia={retryMedia}
       />
 
       <Composer

@@ -470,6 +470,23 @@ select:focus {
   }
 }
 
+/* Inline loading spinner (attachment thumbnails, media downloads). */
+.spinner {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  opacity: 0.6;
+  animation: spinner-rotate 0.7s linear infinite;
+}
+
+@keyframes spinner-rotate {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 /* Tables scroll sideways on small screens rather than breaking the layout. */
 .table-wrap {
   width: 100%;

@@ -16,8 +16,30 @@ export default function Composer({
 }) {
   const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const inputRef = useRef(null);
   const fileRef = useRef(null);
+
+  // A multi-select, a drop, and a paste all end up here.
+  function emitFiles(fileList) {
+    if (!allowAttachments || disabled) return;
+    const files = Array.from(fileList || []).filter(Boolean);
+    if (files.length) onAttach(files);
+  }
+
+  function onDrop(e) {
+    e.preventDefault();
+    setDragOver(false);
+    emitFiles(e.dataTransfer?.files);
+  }
+
+  function onPaste(e) {
+    const files = Array.from(e.clipboardData?.files || []);
+    if (files.length) {
+      e.preventDefault();
+      emitFiles(files);
+    }
+  }
 
   async function submit() {
     const body = text.trim();
@@ -47,7 +69,17 @@ export default function Composer({
   }
 
   return (
-    <div style={styles.wrap}>
+    <div
+      style={{ ...styles.wrap, ...(dragOver ? styles.wrapDragOver : null) }}
+      onDragOver={(e) => {
+        if (!allowAttachments || disabled) return;
+        e.preventDefault();
+        setDragOver(true);
+      }}
+      onDragLeave={() => setDragOver(false)}
+      onDrop={onDrop}
+    >
+      {dragOver && <div style={styles.dropHint}>Drop to send</div>}
       {replyTo && (
         <div style={styles.replyBar}>
           <div style={styles.replyBody}>
@@ -76,10 +108,10 @@ export default function Composer({
             <input
               ref={fileRef}
               type="file"
+              multiple
               style={{ display: "none" }}
               onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) onAttach(file);
+                emitFiles(e.target.files);
                 e.target.value = "";
               }}
             />
@@ -95,6 +127,7 @@ export default function Composer({
           placeholder={placeholder}
           style={styles.input}
           onKeyDown={onKeyDown}
+          onPaste={allowAttachments ? onPaste : undefined}
           onChange={(e) => {
             setText(e.target.value);
             e.target.style.height = "auto";
@@ -117,10 +150,29 @@ export default function Composer({
 
 const styles = {
   wrap: {
+    position: "relative",
     flexShrink: 0,
     borderTop: "1px solid var(--border)",
     background: "var(--card)",
     paddingBottom: "var(--safe-bottom)",
+  },
+  wrapDragOver: {
+    outline: "2px dashed var(--primary)",
+    outlineOffset: -4,
+  },
+  dropHint: {
+    position: "absolute",
+    inset: 0,
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    background: "var(--card)",
+    opacity: 0.94,
+    color: "var(--primary)",
+    fontWeight: 700,
+    fontSize: 14,
+    zIndex: 2,
+    pointerEvents: "none",
   },
   bar: {
     display: "flex",

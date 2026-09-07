@@ -1,6 +1,12 @@
 import { useEffect } from "react";
 
-export default function ImageModal({ imageUrl, filename, onClose, onDownload }) {
+export default function ImageModal({
+  imageUrl,
+  filename,
+  isVideo = false,
+  onClose,
+  onDownload,
+}) {
   // Escape to dismiss, matching the rest of the app's modals.
   useEffect(() => {
     const onKey = (e) => {
@@ -21,7 +27,11 @@ export default function ImageModal({ imageUrl, filename, onClose, onDownload }) 
         </button>
       </div>
 
-      <img src={imageUrl} alt={filename} style={styles.image} />
+      {isVideo ? (
+        <video src={imageUrl} style={styles.image} controls autoPlay playsInline />
+      ) : (
+        <img src={imageUrl} alt={filename} style={styles.image} />
+      )}
 
       <div style={styles.caption}>{filename}</div>
     </div>

@@ -3,9 +3,15 @@ import { getMessages } from "../api/messages";
 import { currentUser } from "../api/auth";
 import { chatSocket } from "../services/websocket";
 import { decryptMessage, encryptMessage } from "../crypto/e2ee";
+import { uploadMedia, releaseMediaURL } from "../api/media";
 
 // Delivery states, in the order a message passes through them.
 const STATUS_ORDER = { sent: 0, delivered: 1, seen: 2 };
+
+// Optimistic (not-yet-acknowledged) messages get an id from up here so they
+// always sort after every real message — the server assigns real ids from a
+// SERIAL sequence that will not reach this range in the life of the app.
+const CLIENT_ID_BASE = 1e15;
 
 /**
  * Delivery state only ever moves forwards. Status events can arrive out of
@@ -76,6 +82,15 @@ export function useChat({ chatId, encrypted = false, privateKey = null, recipien
   encryptedRef.current = encrypted;
   chatIdRef.current = chatId;
 
+  // Media upload bookkeeping.
+  const mediaCounter = useRef(0);
+  // Filenames of uploads in flight: the server echoes a media message over the
+  // socket too, and without this we would briefly show it twice — once as the
+  // optimistic bubble, once as the echo.
+  const pendingMediaNames = useRef(new Set());
+  // Object URLs minted for local previews, revoked when the chat is left.
+  const localURLs = useRef([]);
+
   /** Turn a wire message into something renderable, decrypting if needed. */
   const materialise = useCallback(async (msg) => {
     if (!msg.is_encrypted) return msg;
@@ -107,7 +122,14 @@ export function useChat({ chatId, encrypted = false, privateKey = null, recipien
 
   const dropMessages = useCallback((ids) => {
     const gone = new Set(ids);
-    setMessages((prev) => prev.filter((m) => !gone.has(m.id)));
+    setMessages((prev) => {
+      for (const m of prev) {
+        if (!gone.has(m.id)) continue;
+        releaseMediaURL(m.id);
+        if (m._localURL) URL.revokeObjectURL(m._localURL);
+      }
+      return prev.filter((m) => !gone.has(m.id));
+    });
   }, []);
 
   const load = useCallback(async () => {
@@ -131,6 +153,17 @@ export function useChat({ chatId, encrypted = false, privateKey = null, recipien
     setLoading(true);
     load();
   }, [chatId, load]);
+
+  // Revoke local preview URLs when leaving the conversation.
+  useEffect(() => {
+    const urls = localURLs.current;
+    const pending = pendingMediaNames.current;
+    return () => {
+      urls.forEach((u) => URL.revokeObjectURL(u));
+      urls.length = 0;
+      pending.clear();
+    };
+  }, [chatId]);
 
   useEffect(() => {
     chatSocket.start();
@@ -158,6 +191,16 @@ export function useChat({ chatId, encrypted = false, privateKey = null, recipien
       }
 
       if (msg.type === "message" || msg.type === "media") {
+        // Suppress the socket echo of an attachment we are uploading right now;
+        // sendMedia() owns that bubble until its HTTP response lands.
+        const echoOfMyUpload =
+          !msg.is_system &&
+          (msg.type === "media" || msg.has_file) &&
+          msg.from === currentUser() &&
+          msg.filename &&
+          pendingMediaNames.current.has(msg.filename);
+        if (echoOfMyUpload) return;
+
         const rendered = await materialise(msg);
         if (msg.is_system) rendered.type = "system";
         mergeMessages([rendered]);
@@ -248,5 +291,121 @@ export function useChat({ chatId, encrypted = false, privateKey = null, recipien
     []
   );
 
-  return { messages, status, loading, error, setError, send, reload: load };
+  /**
+   * Send an attachment with an optimistic bubble: it appears immediately with a
+   * local preview and a progress ring, tracks the upload percentage, then
+   * settles onto the real server message id. A failure leaves the bubble in
+   * place marked failed, so it can be retried without re-picking the file.
+   */
+  const sendMedia = useCallback(
+    async (file, replyTo) => {
+      if (!file) return false;
+      // Attachments in a secure chat would be stored server-side in cleartext,
+      // silently breaking the guarantee the padlock implies. The Composer hides
+      // the control there; this is the backstop.
+      if (encryptedRef.current) {
+        setError("Attachments are disabled in secure chats.");
+        return false;
+      }
+
+      const chat = chatIdRef.current;
+      const tempId = CLIENT_ID_BASE + mediaCounter.current++;
+      const mime = file.type || "application/octet-stream";
+      const previewable = mime.startsWith("image/") || mime.startsWith("video/");
+      const localURL = previewable ? URL.createObjectURL(file) : null;
+      if (localURL) localURLs.current.push(localURL);
+
+      pendingMediaNames.current.add(file.name);
+
+      const optimistic = {
+        id: tempId,
+        from: currentUser(),
+        type: "media",
+        has_file: true,
+        filename: file.name,
+        mime_type: mime,
+        content: file.name,
+        created_at: new Date().toISOString(),
+        status: "sent",
+        reply_to: replyTo || null,
+        pending: true,
+        progress: 0,
+        _localURL: localURL,
+        _size: file.size,
+        _file: file,
+      };
+      setMessages((prev) => [...prev, optimistic].sort(compareMessages));
+
+      const { promise } = uploadMedia(chat, file, {
+        onProgress: (p) =>
+          setMessages((prev) =>
+            prev.map((m) => (m.id === tempId ? { ...m, progress: p } : m))
+          ),
+      });
+
+      try {
+        const { message_id } = await promise;
+        setMessages((prev) => {
+          const withoutTemp = prev.filter((m) => m.id !== tempId);
+          const already = withoutTemp.find((m) => m.id === message_id);
+          if (already) {
+            // The socket echo won the race after all; keep the local preview so
+            // it does not re-download what we just uploaded.
+            return withoutTemp
+              .map((m) =>
+                m.id === message_id
+                  ? { ...m, _localURL: m._localURL || localURL }
+                  : m
+              )
+              .sort(compareMessages);
+          }
+          return [
+            ...withoutTemp,
+            {
+              ...optimistic,
+              id: message_id,
+              pending: false,
+              failed: false,
+              progress: 100,
+              _file: undefined,
+            },
+          ].sort(compareMessages);
+        });
+        return true;
+      } catch (err) {
+        setMessages((prev) =>
+          prev.map((m) =>
+            m.id === tempId ? { ...m, pending: false, failed: true } : m
+          )
+        );
+        setError(err.message || "Upload failed");
+        return false;
+      } finally {
+        pendingMediaNames.current.delete(file.name);
+      }
+    },
+    []
+  );
+
+  /** Re-run a failed upload from its optimistic bubble. */
+  const retryMedia = useCallback(
+    (message) => {
+      if (!message?._file) return;
+      setMessages((prev) => prev.filter((m) => m.id !== message.id));
+      sendMedia(message._file, message.reply_to);
+    },
+    [sendMedia]
+  );
+
+  return {
+    messages,
+    status,
+    loading,
+    error,
+    setError,
+    send,
+    sendMedia,
+    retryMedia,
+    reload: load,
+  };
 }
