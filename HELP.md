@@ -426,7 +426,7 @@ Makefile                   shortcuts for everything above
 
 ## Troubleshooting
 
-**`make up` fails: "port is already allocated"** — something else is on `HTTP_PORT`. Change it in `.env`.
+**`make up` fails: "port is already allocated"** — something else is on `HTTP_PORT`. `make up` and `make up-prebuilt` now run `scripts/preflight.sh` first: it moves `.env` to the next free port when the configured one is taken (then re-run `make nginx` so the proxy follows), and starts compose with any shell-exported `HTTP_PORT` unset, since a shell variable would otherwise silently override `.env`. Run it alone with `make preflight`.
 
 **Backend exits with "JWT_SECRET must be set"** — run `make secrets`, or set it manually in `.env`.
 

@@ -1,4 +1,4 @@
-.PHONY: help env secrets vapid up lan certs https tunnel down restart build logs ps clean db-shell backend-shell \
+.PHONY: help env preflight secrets vapid up lan certs https tunnel down restart build logs ps clean db-shell backend-shell \
         test backend-test frontend-test backend-build frontend-install frontend-build \
         bootstrap check-ports nginx nginx-config install-docker mirrors mirrors-go mirrors-npm \
         build-images load-images up-prebuilt
@@ -106,14 +106,19 @@ build-images: ## [dev machine] Build images and pack them into dist/ to carry to
 load-images: ## [server] Load the image bundle copied from your machine
 	@bash scripts/load-images.sh
 
-up-prebuilt: env ## [server] Start the stack from already-loaded images, never building
-	$(COMPOSE) up -d --no-build --wait
+# HTTP_PORT is unset for compose on purpose: a stray export in the shell would
+# otherwise override .env and silently ignore whatever port it says.
+preflight: env ## Check the host port in .env is free (and not shadowed by the shell)
+	@bash scripts/preflight.sh
+
+up-prebuilt: env preflight ## [server] Start the stack from already-loaded images, never building
+	env -u HTTP_PORT $(COMPOSE) up -d --no-build --wait
 	@$(COMPOSE) ps
 
 ## --- Docker deployment ---
 
-up: env ## Build images if needed and start the whole stack in the background
-	$(COMPOSE) up -d --build
+up: env preflight ## Build images if needed and start the whole stack in the background
+	env -u HTTP_PORT $(COMPOSE) up -d --build
 
 # HTTP_PORT is set in the shell, which takes precedence over .env, so a
 # checkout configured for a localhost-only production bind can still be opened
