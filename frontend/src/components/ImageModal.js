@@ -4,6 +4,7 @@ export default function ImageModal({
   imageUrl,
   filename,
   isVideo = false,
+  isAudio = false,
   onClose,
   onDownload,
 }) {
@@ -27,7 +28,12 @@ export default function ImageModal({
         </button>
       </div>
 
-      {isVideo ? (
+      {isAudio ? (
+        <div style={styles.audio}>
+          <div style={{ fontSize: 64 }}>🎵</div>
+          <audio src={imageUrl} controls autoPlay style={{ width: "100%", maxWidth: 420 }} />
+        </div>
+      ) : isVideo ? (
         <video src={imageUrl} style={styles.image} controls autoPlay playsInline />
       ) : (
         <img src={imageUrl} alt={filename} style={styles.image} />
@@ -68,6 +74,16 @@ const styles = {
     minHeight: 0,
     objectFit: "contain",
     width: "100%",
+  },
+  audio: {
+    flex: 1,
+    minHeight: 0,
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 20,
+    padding: 16,
   },
   caption: {
     padding: 16,

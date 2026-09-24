@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   deleteFile,
   downloadFile,
@@ -49,197 +50,289 @@ function kindOf(mime, filename) {
 
 const ICONS = { image: "🖼️", video: "🎬", audio: "🎵", file: "📄" };
 
+// Images up to this size get an inline thumbnail. There is no server-side
+// thumbnail endpoint, so a "thumbnail" is the whole file; anything bigger is
+// left as an icon until the user taps it, or a phone would download tens of
+// megabytes just to draw a list.
+const THUMB_MAX_BYTES = 4 * 1024 * 1024;
+
+/** Asks for a private file's password, then hands it back to the caller. */
+function PasswordDialog({ title, onClose, onSubmit }) {
+  const [password, setPassword] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  async function submit() {
+    if (!password) return;
+    setBusy(true);
+    setError("");
+    try {
+      await onSubmit(password);
+    } catch (err) {
+      setError(err.message || "رمز نادرست است");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Modal onClose={onClose}>
+      <div style={{ padding: 20 }} className="stack">
+        <h3 style={{ margin: 0 }}>🔒 این فایل خصوصی است</h3>
+        <div className="muted" style={{ wordBreak: "break-word" }}>
+          {title}
+        </div>
+        <input
+          className="field"
+          type="password"
+          autoFocus
+          placeholder="رمز فایل"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+          onKeyDown={(e) => e.key === "Enter" && submit()}
+        />
+        {error && <div className="error-text">{error}</div>}
+        <div className="row" style={{ justifyContent: "flex-end", gap: 8 }}>
+          <button className="btn btn-secondary" onClick={onClose}>
+            انصراف
+          </button>
+          <button className="btn" onClick={submit} disabled={busy || !password}>
+            {busy ? "…" : "باز کن"}
+          </button>
+        </div>
+      </div>
+    </Modal>
+  );
+}
+
 /**
- * One entry in the library.
+ * One entry in the library, laid out as a compact row: a small thumbnail, the
+ * details, and an always-visible action bar underneath.
+ *
+ * Nothing heavy happens until it has to. A thumbnail is fetched only once the
+ * row scrolls into view (and only for modest images); full-size images, video
+ * and audio are fetched when the user taps the row and shown in a full-screen
+ * viewer. Fetching every file on mount — the old behaviour — meant opening
+ * the page downloaded the entire library at once.
  *
  * A locked item stays locked until the password is verified against the
  * server: guessing inside an <img> tag can only ever report "broken", so the
  * password is checked with an explicit call first and only then are the bytes
  * fetched.
  */
-function FileCard({ file, me, onDeleted, onEdit }) {
+function FileRow({ file, me, onDeleted, onEdit }) {
   const kind = kindOf(file.mime_type, file.filename);
   const locked = file.visibility === "private" && !file.can_open;
+  const canView = kind === "image" || kind === "video" || kind === "audio";
+  const wantsThumb =
+    kind === "image" && file.size_bytes > 0 && file.size_bytes <= THUMB_MAX_BYTES;
 
-  const [url, setUrl] = useState(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [password, setPassword] = useState("");
   const [unlocked, setUnlocked] = useState(!locked);
-  const [preview, setPreview] = useState(null);
+  const [password, setPassword] = useState("");
+  const [asking, setAsking] = useState(false);
+  const [thumb, setThumb] = useState(null);
+  const [viewer, setViewer] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const rowRef = useRef(null);
 
-  // Object URLs are owned by this card; leaking them would pin the whole file
+  // Object URLs are owned by this row; leaking them would pin the whole file
   // in memory for as long as the page lives.
-  const urlRef = useRef(null);
+  const thumbRef = useRef(null);
   useEffect(() => {
-    urlRef.current = url;
-  }, [url]);
+    thumbRef.current = thumb;
+  }, [thumb]);
   useEffect(
     () => () => {
-      if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+      if (thumbRef.current) URL.revokeObjectURL(thumbRef.current);
     },
     []
   );
 
-  const canPreview = kind === "image" || kind === "video" || kind === "audio";
-
-  const load = useCallback(
-    async (pw) => {
-      setLoading(true);
-      setError("");
-      try {
-        const u = await fetchFileURL(file.id, pw);
-        setUrl(u);
-      } catch (err) {
-        setError(err.message || "خطا در دریافت فایل");
-      } finally {
-        setLoading(false);
-      }
-    },
-    [file.id]
-  );
-
-  // Public (or owned) media renders itself; locked media waits for a password.
+  // Lazy thumbnail: wait until the row is actually near the screen.
   useEffect(() => {
-    if (unlocked && canPreview && !url && !loading && !error) load(password);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [unlocked]);
+    if (!wantsThumb || !unlocked || thumb) return undefined;
 
-  async function submitPassword() {
-    setLoading(true);
+    let cancelled = false;
+    const fetchThumb = async () => {
+      try {
+        const u = await fetchFileURL(file.id, password);
+        if (cancelled) URL.revokeObjectURL(u);
+        else setThumb(u);
+      } catch {
+        /* the icon stays; tapping the row reports the real error */
+      }
+    };
+
+    const el = rowRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") {
+      fetchThumb();
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    const io = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((e) => e.isIntersecting)) {
+          io.disconnect();
+          fetchThumb();
+        }
+      },
+      { rootMargin: "240px 0px" }
+    );
+    io.observe(el);
+    return () => {
+      cancelled = true;
+      io.disconnect();
+    };
+    // password is only ever set as the file becomes unlocked
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [wantsThumb, unlocked, file.id]);
+
+  async function save(pw = password) {
     setError("");
     try {
-      await unlockFile(file.id, password);
-      setUnlocked(true);
-      if (canPreview) await load(password);
+      await downloadFile(file.id, file.filename, pw);
     } catch (err) {
-      setError(err.message || "رمز نادرست است");
-      setLoading(false);
+      setError(err.message || "دانلود ناموفق بود");
     }
   }
 
-  async function save() {
+  async function show(pw) {
+    setBusy(true);
+    setError("");
     try {
-      await downloadFile(file.id, file.filename, unlocked ? password : "");
+      const url = kind === "image" && thumb ? thumb : await fetchFileURL(file.id, pw);
+      setViewer({ url, own: url !== thumb });
     } catch (err) {
-      setError(err.message || "دانلود ناموفق بود");
+      setError(err.message || "خطا در دریافت فایل");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  function closeViewer() {
+    if (viewer && viewer.own) URL.revokeObjectURL(viewer.url);
+    setViewer(null);
+  }
+
+  function open() {
+    if (busy) return;
+    if (!unlocked) {
+      setAsking(true);
+      return;
+    }
+    if (canView) show(password);
+    else save();
+  }
+
+  async function submitPassword(pw) {
+    await unlockFile(file.id, pw);
+    setPassword(pw);
+    setUnlocked(true);
+    setAsking(false);
+    if (canView) await show(pw);
+    else await save(pw);
+  }
+
+  async function remove() {
+    if (!window.confirm(`«${file.title}» حذف شود؟`)) return;
+    try {
+      await deleteFile(file.id);
+      onDeleted(file.id);
+    } catch (err) {
+      setError(err.message);
     }
   }
 
   const mine = file.is_owner || file.owner === me;
 
   return (
-    <div className="card card-interactive" style={styles.card}>
-      {preview && (
-        <ImageModal
-          imageUrl={preview.url}
-          filename={preview.filename}
-          isVideo={preview.kind === "video"}
-          onClose={() => setPreview(null)}
-          onDownload={save}
+    <div className="card file-row" ref={rowRef}>
+      {asking && (
+        <PasswordDialog
+          title={file.title}
+          onClose={() => setAsking(false)}
+          onSubmit={submitPassword}
         />
       )}
-
-      <div style={styles.media}>
-        {!unlocked && (
-          <div style={styles.locked}>
-            <div style={{ fontSize: 34 }}>🔒</div>
-            <div style={styles.lockedText}>این فایل خصوصی است</div>
-            <div className="row" style={{ gap: 6, width: "100%" }}>
-              <input
-                className="field"
-                type="password"
-                placeholder="رمز فایل"
-                style={{ flex: 1, fontSize: 13 }}
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && submitPassword()}
-              />
-              <button className="btn" onClick={submitPassword} disabled={loading}>
-                {loading ? "…" : "باز کن"}
-              </button>
-            </div>
-          </div>
+      {/* Portalled for the same reason Modal is: position: fixed is anchored
+          to the nearest transformed ancestor, and the page-transition
+          animation puts one on .app-content. */}
+      {viewer &&
+        createPortal(
+          <ImageModal
+            imageUrl={viewer.url}
+            filename={file.title || file.filename}
+            isVideo={kind === "video"}
+            isAudio={kind === "audio"}
+            onClose={closeViewer}
+            onDownload={() => save()}
+          />,
+          document.body
         )}
 
-        {unlocked && canPreview && url && kind === "image" && (
-          <img
-            src={url}
-            alt={file.title}
-            style={styles.thumb}
-            onClick={() => setPreview({ url, filename: file.filename, kind })}
-          />
-        )}
-        {unlocked && canPreview && url && kind === "video" && (
-          <video src={url} style={styles.thumb} controls preload="metadata" />
-        )}
-        {unlocked && canPreview && url && kind === "audio" && (
-          <div style={styles.audioWrap}>
-            <div style={{ fontSize: 34 }}>🎵</div>
-            <audio src={url} controls style={{ width: "100%" }} />
-          </div>
-        )}
-        {unlocked && canPreview && !url && (
-          <div style={styles.placeholder}>
-            {loading ? <span className="spinner" /> : <span>{ICONS[kind]}</span>}
-          </div>
-        )}
-        {unlocked && !canPreview && (
-          <div style={styles.placeholder}>
-            <span style={{ fontSize: 40 }}>{ICONS.file}</span>
-          </div>
-        )}
-      </div>
+      <button
+        type="button"
+        className="file-main"
+        onClick={open}
+        aria-label={file.title}
+      >
+        <span className="file-thumb">
+          {thumb ? (
+            <img src={thumb} alt="" />
+          ) : busy ? (
+            <span className="spinner" />
+          ) : (
+            <span className="file-thumb-icon">{ICONS[kind]}</span>
+          )}
+          {!unlocked && <span className="file-badge">🔒</span>}
+          {unlocked && kind === "video" && <span className="file-badge">▶</span>}
+        </span>
 
-      <div style={styles.body}>
-        <div style={styles.title} title={file.title}>
-          {file.visibility === "private" && <span title="خصوصی">🔒 </span>}
-          {file.title}
-        </div>
+        <span className="file-info">
+          <span className="file-title">
+            {file.visibility === "private" && unlocked && <span>🔒 </span>}
+            {file.title}
+          </span>
+          {file.description && <span className="file-desc">{file.description}</span>}
+          <span className="file-meta">
+            {[file.owner || "ناشناس", formatBytes(file.size_bytes), formatDate(file.created_at)]
+              .filter(Boolean)
+              .join(" · ")}
+          </span>
+        </span>
+      </button>
 
-        {file.description && <div style={styles.desc}>{file.description}</div>}
+      {error && <div className="error-text file-error">{error}</div>}
 
-        <div style={styles.meta}>
-          <span>{file.owner || "ناشناس"}</span>
-          <span> · </span>
-          <span>{formatBytes(file.size_bytes)}</span>
-          <span> · </span>
-          <span>{formatDate(file.created_at)}</span>
-        </div>
-
-        {error && <div className="error-text" style={{ fontSize: 12 }}>{error}</div>}
-
-        <div className="row" style={{ gap: 6, flexWrap: "wrap" }}>
-          <button className="btn btn-secondary" style={styles.smallBtn} onClick={save}>
+      <div className="file-actions">
+        <button type="button" className="file-action" onClick={open}>
+          {canView ? "👁 نمایش" : "📥 دانلود"}
+        </button>
+        {canView && (
+          <button
+            type="button"
+            className="file-action"
+            onClick={() => (unlocked ? save() : setAsking(true))}
+          >
             📥 دانلود
           </button>
-          {mine && (
-            <>
-              <button
-                className="btn btn-secondary"
-                style={styles.smallBtn}
-                onClick={() => onEdit(file)}
-              >
-                ✏️ ویرایش
-              </button>
-              <button
-                className="btn btn-secondary"
-                style={styles.smallBtn}
-                onClick={async () => {
-                  if (!window.confirm(`«${file.title}» حذف شود؟`)) return;
-                  try {
-                    await deleteFile(file.id);
-                    onDeleted(file.id);
-                  } catch (err) {
-                    setError(err.message);
-                  }
-                }}
-              >
-                🗑 حذف
-              </button>
-            </>
-          )}
-        </div>
+        )}
+        {mine && (
+          <>
+            <button type="button" className="file-action" onClick={() => onEdit(file)}>
+              ✏️ ویرایش
+            </button>
+            <button
+              type="button"
+              className="file-action file-action-danger"
+              onClick={remove}
+            >
+              🗑 حذف
+            </button>
+          </>
+        )}
       </div>
     </div>
   );
@@ -452,6 +545,8 @@ function EditModal({ file, onClose, onSaved }) {
   );
 }
 
+const PAGE_SIZE = 40;
+
 /**
  * The shared library: anything anyone posts, public or password-protected.
  * Separate from chats on purpose — this is a noticeboard, not a conversation.
@@ -461,24 +556,58 @@ export default function PublicFiles() {
 
   const [files, setFiles] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [mine, setMine] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [editing, setEditing] = useState(null);
 
+  // Guards against a slow response for an old search overwriting a newer one.
+  const requestRef = useRef(0);
+
   const load = useCallback(async () => {
+    const req = ++requestRef.current;
     setLoading(true);
     try {
-      const data = await listFiles({ search, mine });
-      setFiles(data.files || []);
+      const data = await listFiles({ search, mine, limit: PAGE_SIZE, offset: 0 });
+      if (req !== requestRef.current) return;
+      const list = data.files || [];
+      setFiles(list);
+      setHasMore(list.length === PAGE_SIZE);
       setError("");
+    } catch (err) {
+      if (req !== requestRef.current) return;
+      setError(err.message || "خطا در دریافت فهرست");
+    } finally {
+      if (req === requestRef.current) setLoading(false);
+    }
+  }, [search, mine]);
+
+  async function loadMore() {
+    const req = requestRef.current;
+    setLoadingMore(true);
+    try {
+      const data = await listFiles({
+        search,
+        mine,
+        limit: PAGE_SIZE,
+        offset: files.length,
+      });
+      if (req !== requestRef.current) return;
+      const next = data.files || [];
+      setFiles((prev) => {
+        const seen = new Set(prev.map((f) => f.id));
+        return [...prev, ...next.filter((f) => !seen.has(f.id))];
+      });
+      setHasMore(next.length === PAGE_SIZE);
     } catch (err) {
       setError(err.message || "خطا در دریافت فهرست");
     } finally {
-      setLoading(false);
+      setLoadingMore(false);
     }
-  }, [search, mine]);
+  }
 
   // Debounced so typing in the search box does not fire a request per keypress.
   useEffect(() => {
@@ -496,7 +625,7 @@ export default function PublicFiles() {
       )}
 
       <div className="app-header">
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 1, minWidth: 0 }}>
           <h2 style={{ margin: 0, fontSize: 20 }}>فایل‌ها و رسانه‌ها</h2>
           <div className="muted">فضای اشتراکی همه کاربران</div>
         </div>
@@ -505,10 +634,11 @@ export default function PublicFiles() {
         </button>
       </div>
 
-      <div style={{ padding: "10px 12px", display: "flex", gap: 8 }}>
+      <div className="files-toolbar">
         <input
           className="field"
-          style={{ flex: 1 }}
+          type="search"
+          enterKeyHint="search"
           placeholder="جستجو در عنوان، نام فایل یا کاربر…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
@@ -522,19 +652,17 @@ export default function PublicFiles() {
         </button>
       </div>
 
-      {error && (
-        <div className="error-text" style={{ padding: "0 12px" }}>
-          {error}
-        </div>
-      )}
+      {error && <div className="error-text files-error">{error}</div>}
 
-      <div className="scroll-area stagger" style={styles.grid}>
-        {loading && <div style={styles.empty}>در حال بارگذاری…</div>}
+      <div className="scroll-area files-grid">
+        {loading && files.length === 0 && (
+          <div className="files-empty">در حال بارگذاری…</div>
+        )}
         {!loading && files.length === 0 && (
-          <div style={styles.empty}>هنوز فایلی بارگذاری نشده است.</div>
+          <div className="files-empty">هنوز فایلی بارگذاری نشده است.</div>
         )}
         {files.map((f) => (
-          <FileCard
+          <FileRow
             key={f.id}
             file={f}
             me={me}
@@ -542,84 +670,16 @@ export default function PublicFiles() {
             onDeleted={(id) => setFiles((prev) => prev.filter((x) => x.id !== id))}
           />
         ))}
+        {hasMore && (
+          <button
+            className="btn btn-secondary files-more"
+            onClick={loadMore}
+            disabled={loadingMore}
+          >
+            {loadingMore ? "…" : "نمایش موارد بیشتر"}
+          </button>
+        )}
       </div>
     </div>
   );
 }
-
-const styles = {
-  grid: {
-    padding: 12,
-    display: "grid",
-    gap: 12,
-    gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
-    alignContent: "start",
-  },
-  empty: {
-    gridColumn: "1 / -1",
-    textAlign: "center",
-    color: "var(--subtext)",
-    padding: 32,
-  },
-  card: { padding: 0, overflow: "hidden", display: "flex", flexDirection: "column" },
-  media: {
-    position: "relative",
-    background: "var(--bubble-in)",
-    minHeight: 150,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  thumb: {
-    display: "block",
-    width: "100%",
-    maxHeight: 220,
-    objectFit: "cover",
-    cursor: "pointer",
-    background: "#000",
-  },
-  placeholder: {
-    width: "100%",
-    minHeight: 150,
-    display: "flex",
-    alignItems: "center",
-    justifyContent: "center",
-    fontSize: 40,
-  },
-  audioWrap: {
-    width: "100%",
-    padding: 16,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: 10,
-  },
-  locked: {
-    width: "100%",
-    padding: 16,
-    display: "flex",
-    flexDirection: "column",
-    alignItems: "center",
-    gap: 8,
-  },
-  lockedText: { fontSize: 13, color: "var(--subtext)" },
-  body: { padding: 12, display: "flex", flexDirection: "column", gap: 6, flex: 1 },
-  title: {
-    fontWeight: 600,
-    fontSize: 14,
-    overflow: "hidden",
-    textOverflow: "ellipsis",
-    whiteSpace: "nowrap",
-  },
-  desc: {
-    fontSize: 12,
-    color: "var(--subtext)",
-    lineHeight: 1.6,
-    display: "-webkit-box",
-    WebkitLineClamp: 2,
-    WebkitBoxOrient: "vertical",
-    overflow: "hidden",
-  },
-  meta: { fontSize: 11, color: "var(--subtext)" },
-  smallBtn: { fontSize: 12, padding: "5px 10px" },
-};
