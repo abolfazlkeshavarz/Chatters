@@ -27,8 +27,9 @@ type adminChat struct {
 	CreatedAt           time.Time  `json:"created_at"`
 	LastActivity        *time.Time `json:"last_activity,omitempty"`
 
-	// A chat a user deleted "for everyone" is retained for moderation rather
-	// than destroyed, so the panel has to be able to tell the two apart.
+	// Populated only for chats deleted before user deletions stopped being
+	// retained; a chat a user deletes now is gone outright and never appears
+	// here at all. Kept so any such historical row still displays correctly.
 	DeletedAt   *time.Time `json:"deleted_at,omitempty"`
 	DeletedBy   *string    `json:"deleted_by,omitempty"`
 	DeletedMsgs int        `json:"deleted_message_count"`
@@ -48,17 +49,17 @@ func AdminListChats(c *gin.Context) {
 		offset = v
 	}
 
-	// "all" by default: a moderator opening this list wants to see everything
-	// that exists, including what users removed — that retention is the reason
-	// the rows are still here.
+	// "all" by default. User deletions are no longer retained, so "deleted"
+	// only ever matches a chat removed before that changed; this stays for
+	// compatibility with any such historical row rather than for new ones.
 	state := c.DefaultQuery("state", "all")
 	if state != "all" && state != "live" && state != "deleted" {
 		state = "all"
 	}
 
-	// A LEFT JOIN plus the member snapshot, not an inner JOIN on chat_members:
-	// deleting a chat for everyone clears its membership rows, so an inner join
-	// would hide from the panel exactly the conversations it is retained for.
+	// A LEFT JOIN plus the member-history fallback, kept for the same reason:
+	// a chat's membership rows are gone by the time any historical deleted_at
+	// row could be viewed here.
 	rows, err := db.DB.Query(
 		`SELECT c.id, c.is_group, c.is_secret, c.e2e_enabled, c.e2e_status,
 		        c.self_destruct_seconds, c.name, c.created_at,

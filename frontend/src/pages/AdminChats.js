@@ -270,9 +270,10 @@ export default function AdminChats({ onNotice, onError }) {
       </div>
 
       <div className="muted" style={{ fontSize: 13, lineHeight: 1.7 }}>
-        A chat a user deletes “for everyone” is retained here rather than
-        destroyed — {deletedCount} so far. Deleting one from this panel is the
-        only action that actually removes it and its attachments from disk.
+        A chat a user deletes is removed outright now — nothing is kept for
+        review.
+        {deletedCount > 0 &&
+          ` The ${deletedCount} shown as "deleted" below predate that change and are kept only for reference.`}
       </div>
 
       <div className="card" style={{ padding: 0 }}>
@@ -323,7 +324,7 @@ export default function AdminChats({ onNotice, onError }) {
                           style={{ background: "#fee2e2", color: "#991b1b" }}
                           title={`Deleted by ${chat.deleted_by || "a member"} on ${fmt(
                             chat.deleted_at
-                          )} — retained for moderation`}
+                          )} — from before deletions stopped being retained`}
                         >
                           {" "}
                           🗑 deleted
@@ -332,7 +333,7 @@ export default function AdminChats({ onNotice, onError }) {
                       {chat.deleted_message_count > 0 && (
                         <span
                           className="badge"
-                          title={`${chat.deleted_message_count} message(s) deleted by their sender, retained here`}
+                          title={`${chat.deleted_message_count} message(s) deleted by their sender before that change, retained here`}
                         >
                           {" "}
                           {chat.deleted_message_count} removed
@@ -423,7 +424,7 @@ export default function AdminChats({ onNotice, onError }) {
                         style={{ background: "#fee2e2", color: "#991b1b" }}
                         title={`Deleted by ${m.deleted_by || "its sender"} on ${fmt(
                           m.deleted_at
-                        )} — hidden from members, retained here`}
+                        )} — from before deletions stopped being retained`}
                       >
                         {" "}
                         🗑 deleted

@@ -20,8 +20,9 @@ type deleteScopeReq struct {
 
 // DeleteMessage removes a message either just for the caller ("me": a per-user
 // tombstone, the row survives for other members) or for everyone ("everyone":
-// the row is hard-deleted). "Everyone" is allowed when the caller sent the
-// message, or in any secret chat where both members share that power.
+// the row and its attachment, if any, are gone for good). "Everyone" is
+// allowed when the caller sent the message, or in any secret chat where both
+// members share that power.
 func DeleteMessage(c *gin.Context) {
 	me := c.GetString("user_id")
 
@@ -44,7 +45,7 @@ func DeleteMessage(c *gin.Context) {
 	err = db.DB.QueryRow(
 		`SELECT m.chat_id, m.type, m.sender_id, m.file_path, c.is_secret
 		   FROM messages m JOIN chats c ON c.id = m.chat_id
-		  WHERE m.id = $1 AND m.deleted_at IS NULL`,
+		  WHERE m.id = $1`,
 		msgID,
 	).Scan(&chatID, &msgType, &sender, &filePath, &isSecret)
 	if err != nil {
@@ -63,18 +64,14 @@ func DeleteMessage(c *gin.Context) {
 			})
 			return
 		}
-		// Stamped, not deleted: every user-facing query filters deleted_at, so
-		// this is indistinguishable from a hard delete for the people in the
-		// chat, while the moderation panel can still produce it. The attachment
-		// is deliberately left on disk for the same reason — removing the file
-		// would leave an admin a row naming evidence that no longer exists.
-		if _, err := db.DB.Exec(
-			`UPDATE messages SET deleted_at = now(), deleted_by = $2
-			 WHERE id = $1 AND deleted_at IS NULL`,
-			msgID, me,
-		); err != nil {
+		// A real delete: nothing is kept for later review. The row is gone,
+		// and so is its attachment, if it had one.
+		if _, err := db.DB.Exec(`DELETE FROM messages WHERE id = $1`, msgID); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete message"})
 			return
+		}
+		if filePath.Valid && filePath.String != "" && withinUploadDir(filePath.String) {
+			_ = os.Remove(filePath.String)
 		}
 		if websocket.GlobalHub != nil {
 			websocket.GlobalHub.BroadcastEvent(chatID, map[string]interface{}{
@@ -107,9 +104,30 @@ func DeleteMessage(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "deleted", "scope": "me"})
 }
 
-// DeleteChat removes a conversation for the caller ("me": leave it / drop it
-// from your list; the chat is deleted outright once nobody is left) or, for a
-// one-to-one or secret chat, for everyone.
+// chatFilePaths returns the disk paths of every attachment in a chat, for
+// removal after the chat row itself (and the messages naming them) is gone.
+func chatFilePaths(q interface {
+	Query(string, ...interface{}) (*sql.Rows, error)
+}, chatID string) []string {
+	var paths []string
+	rows, err := q.Query(`SELECT file_path FROM messages WHERE chat_id = $1 AND file_path IS NOT NULL`, chatID)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var p sql.NullString
+		if rows.Scan(&p) == nil && p.Valid {
+			paths = append(paths, p.String)
+		}
+	}
+	return paths
+}
+
+// DeleteChat removes a conversation for the caller ("me": leave it, or, once
+// nobody is left, remove it outright) or, for a one-to-one or secret chat,
+// for everyone right away. Either way nothing is kept once it is gone: the
+// chat, its messages and their attachments are all deleted for good.
 func DeleteChat(c *gin.Context) {
 	me := c.GetString("user_id")
 	chatID := c.Param("id")
@@ -123,7 +141,7 @@ func DeleteChat(c *gin.Context) {
 	var isGroup, isSecret bool
 	if err := db.DB.QueryRow(
 		`SELECT c.is_group, c.is_secret FROM chats c
-		 WHERE c.id = $1 AND c.deleted_at IS NULL AND EXISTS (
+		 WHERE c.id = $1 AND EXISTS (
 		   SELECT 1 FROM chat_members cm WHERE cm.chat_id = c.id AND cm.user_id = $2
 		 )`,
 		chatID, me,
@@ -147,39 +165,19 @@ func DeleteChat(c *gin.Context) {
 			})
 		}
 
-		tx, err := db.DB.Begin()
-		if err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "db error"})
-			return
-		}
-		defer tx.Rollback()
-
-		// Snapshot the roster before it is torn down, so the panel can still
-		// say who was in a conversation nobody is a member of any more.
-		for _, m := range members {
-			_, _ = tx.Exec(
-				`INSERT INTO chat_member_history (chat_id, user_id) VALUES ($1, $2)
-				 ON CONFLICT DO NOTHING`,
-				chatID, m,
-			)
-		}
-		if _, err := tx.Exec(
-			`UPDATE chats SET deleted_at = now(), deleted_by = $2
-			 WHERE id = $1 AND deleted_at IS NULL`,
-			chatID, me,
-		); err != nil {
+		filePaths := chatFilePaths(db.DB, chatID)
+		// The chat row cascades to its members, messages, keys, mutes and the
+		// direct-chat-pair slot; nothing is left behind for anyone to read.
+		if _, err := db.DB.Exec(`DELETE FROM chats WHERE id = $1`, chatID); err != nil {
 			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete chat"})
 			return
 		}
-		// Frees the pair for a fresh conversation later; the row itself, its
-		// messages and its uploads all stay for the panel.
-		_, _ = tx.Exec(`DELETE FROM direct_chat_pairs WHERE chat_id = $1`, chatID)
-		_, _ = tx.Exec(`DELETE FROM chat_members WHERE chat_id = $1`, chatID)
-
-		if err := tx.Commit(); err != nil {
-			c.JSON(http.StatusInternalServerError, gin.H{"error": "commit failed"})
-			return
+		for _, p := range filePaths {
+			if withinUploadDir(p) {
+				_ = os.Remove(p)
+			}
 		}
+		removeChatUploads(chatID)
 
 		c.JSON(http.StatusOK, gin.H{"status": "deleted", "scope": "everyone"})
 		return
@@ -193,13 +191,6 @@ func DeleteChat(c *gin.Context) {
 	}
 	defer tx.Rollback()
 
-	// Recorded before the membership row goes, so a conversation everyone has
-	// left still knows who was in it.
-	_, _ = tx.Exec(
-		`INSERT INTO chat_member_history (chat_id, user_id) VALUES ($1, $2)
-		 ON CONFLICT DO NOTHING`,
-		chatID, me,
-	)
 	_, _ = tx.Exec(`DELETE FROM chat_members WHERE chat_id = $1 AND user_id = $2`, chatID, me)
 	_, _ = tx.Exec(`DELETE FROM chat_mutes WHERE chat_id = $1 AND user_id = $2`, chatID, me)
 	_, _ = tx.Exec(
@@ -211,23 +202,35 @@ func DeleteChat(c *gin.Context) {
 	var remaining int
 	_ = tx.QueryRow(`SELECT COUNT(*) FROM chat_members WHERE chat_id = $1`, chatID).Scan(&remaining)
 	emptied := remaining == 0
+
+	var filePaths []string
 	if emptied {
-		// Soft, for the same reason as above: the last person leaving is not a
-		// reason to destroy the transcript the panel may need.
-		_, _ = tx.Exec(
-			`UPDATE chats SET deleted_at = now(), deleted_by = $2
-			 WHERE id = $1 AND deleted_at IS NULL`,
-			chatID, me,
-		)
+		// Nobody is left to keep it for: remove the conversation outright
+		// rather than leaving it behind once its last member has gone.
+		filePaths = chatFilePaths(tx, chatID)
+		if _, err := tx.Exec(`DELETE FROM chats WHERE id = $1`, chatID); err != nil {
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to delete chat"})
+			return
+		}
+	} else {
+		// Frees the pair either way: the remaining member should be able to
+		// start a fresh conversation rather than being stuck with one nobody
+		// else is in.
+		_, _ = tx.Exec(`DELETE FROM direct_chat_pairs WHERE chat_id = $1`, chatID)
 	}
-	// Leaving frees the pair either way: the remaining member should be able to
-	// start a fresh conversation rather than being stuck with one nobody else
-	// is in.
-	_, _ = tx.Exec(`DELETE FROM direct_chat_pairs WHERE chat_id = $1`, chatID)
 
 	if err := tx.Commit(); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "commit failed"})
 		return
+	}
+
+	for _, p := range filePaths {
+		if withinUploadDir(p) {
+			_ = os.Remove(p)
+		}
+	}
+	if emptied {
+		removeChatUploads(chatID)
 	}
 
 	if websocket.GlobalHub != nil {
