@@ -56,6 +56,8 @@ android {
 
     buildTypes {
         release {
+            // Keep WebRTC's JNI-reached classes through R8.
+            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = if (storeFilePath != null) signingConfigs.getByName("release")
                             else signingConfigs.getByName("debug")
         }

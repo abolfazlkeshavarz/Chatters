@@ -3,9 +3,12 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:intl/date_symbol_data_local.dart';
 
 import '../services/auth.dart';
+import '../services/call_service.dart';
 import '../services/chat_socket.dart';
 import '../services/notifications.dart';
 import '../storage.dart';
+import 'navigation.dart';
+import 'screens/call_screen.dart';
 import 'screens/chat_screen.dart';
 import 'screens/home_screen.dart';
 import 'screens/login_screen.dart';
@@ -23,6 +26,10 @@ Future<void> runChattersApp() async {
   Auth.instance.init();
   Notifications.instance.onOpenChat = (chatId) {
     navigatorKey.currentState?.push(MaterialPageRoute(builder: (_) => ChatScreen(chatId: chatId)));
+  };
+  CallService.instance.onIncomingCall = () {
+    final ctx = navigatorKey.currentContext;
+    if (ctx != null) showCallScreen(ctx);
   };
   runApp(const ChattersApp());
 }
@@ -92,6 +99,28 @@ class _ChattersAppState extends State<ChattersApp> with WidgetsBindingObserver {
       theme: buildTheme(Brightness.light, s.accent),
       darkTheme: buildTheme(Brightness.dark, s.accent),
       themeAnimationDuration: const Duration(milliseconds: 350),
+      builder: (context, child) => Stack(children: [
+        child!,
+        // Shown over every screen while a call runs with its screen minimized.
+        ListenableBuilder(
+          listenable: Listenable.merge([CallService.instance, CallScreen.visible]),
+          builder: (context, _) {
+            final c = CallService.instance;
+            final show = !CallScreen.visible.value && (c.busy || c.phase == CallPhase.ended);
+            return AnimatedSlide(
+              offset: show ? Offset.zero : const Offset(0, -1.5),
+              duration: const Duration(milliseconds: 300),
+              curve: Curves.easeOutCubic,
+              child: show
+                  ? ReturnToCallBar(onTap: () {
+                      final ctx = navigatorKey.currentContext;
+                      if (ctx != null) showCallScreen(ctx);
+                    })
+                  : const SizedBox.shrink(),
+            );
+          },
+        ),
+      ]),
       home: AnimatedSwitcher(
         duration: const Duration(milliseconds: 450),
         switchInCurve: Curves.easeOutCubic,

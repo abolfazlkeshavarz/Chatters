@@ -224,6 +224,9 @@ class ChatScreenState extends State<ChatScreen> {
     }
   }
 
+  String? _peerId(Map<String, dynamic> chat) =>
+      ((chat['members'] as List?) ?? []).cast<String>().where((m) => m != _me).firstOrNull;
+
   void _openInfo() {
     Navigator.push(
       context,
@@ -306,6 +309,12 @@ class ChatScreenState extends State<ChatScreen> {
                     ),
                   ),
                 ),
+                if (!isGroup && !_pending && _peerId(chat) != null)
+                  IconButton(
+                    tooltip: t('Voice call'),
+                    icon: Icon(Icons.call_rounded, color: p.primary),
+                    onPressed: () => startCall(context, _chatId, _peerId(chat)!),
+                  ),
                 if (timer > 0)
                   Padding(
                     padding: const EdgeInsetsDirectional.only(end: 4),

@@ -8,6 +8,7 @@ import '../crypto/e2ee.dart';
 import '../crypto/keystore.dart';
 import '../storage.dart';
 import 'chat_socket.dart';
+import 'device.dart';
 import 'stores.dart';
 
 /// Signed-in state for the whole app.
@@ -27,8 +28,13 @@ class Auth extends ChangeNotifier {
   }
 
   Future<void> login(String username, String password) async {
-    final data = await Api.request('/login',
-        method: 'POST', auth: false, body: {'username': username, 'password': password}) as Map;
+    final (device, platform) = await describeDevice();
+    final data = await Api.request('/login', method: 'POST', auth: false, body: {
+      'username': username,
+      'password': password,
+      'device': device,
+      'platform': platform,
+    }) as Map;
     final name = (data['username'] as String?) ?? username;
     await Storage.set('token', data['token'] as String);
     await Storage.set('username', name);
@@ -80,6 +86,7 @@ class Auth extends ChangeNotifier {
     ChatSocket.instance.start();
     ChatsStore.instance.start();
     ContactsStore.instance.load();
+    DeveloperStore.instance.load();
     refreshRole();
   }
 
@@ -93,6 +100,13 @@ class Auth extends ChangeNotifier {
   }
 
   Future<void> logout() async {
+    // End the session on the server too, so it leaves the sessions list.
+    // Best effort: signing out must work offline or against a dead server.
+    if (Storage.token != null) {
+      try {
+        await Api.del('/api/sessions/current').timeout(const Duration(seconds: 4));
+      } catch (_) {}
+    }
     await Storage.clearSession();
     await Keystore.clear();
     _signedOut();

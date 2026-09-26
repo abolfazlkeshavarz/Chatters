@@ -6,7 +6,9 @@ import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/design.dart';
 import '../widgets/language_picker.dart';
+import '../../config.dart';
 import 'register_screen.dart';
+import 'server_screen.dart';
 import '../l10n.dart';
 
 class LoginScreen extends StatefulWidget {
@@ -52,6 +54,34 @@ class _LoginScreenState extends State<LoginScreen> {
       body: AuroraBackground(
         child: SafeArea(
           child: Stack(children: [
+            PositionedDirectional(
+              top: 8,
+              start: 12,
+              child: Glass(
+                radius: 20,
+                child: InkWell(
+                  onTap: () async {
+                    await Navigator.push(context, MaterialPageRoute(builder: (_) => const ServerScreen()));
+                    if (mounted) setState(() {});
+                  },
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                    child: Row(mainAxisSize: MainAxisSize.min, children: [
+                      Icon(Icons.dns_rounded, size: 18, color: p.text),
+                      const SizedBox(width: 6),
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 150),
+                        child: Text(apiBase.replaceFirst(RegExp(r'^https?://'), ''),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            textDirection: TextDirection.ltr,
+                            style: TextStyle(color: p.text, fontWeight: FontWeight.w600, fontSize: 13)),
+                      ),
+                    ]),
+                  ),
+                ),
+              ),
+            ),
             PositionedDirectional(
               top: 8,
               end: 12,
@@ -164,15 +194,18 @@ class _Logo extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final p = context.p;
-    return Container(
-      width: 88,
-      height: 88,
-      decoration: BoxDecoration(
-        gradient: p.gradient,
-        borderRadius: BorderRadius.circular(28),
-        boxShadow: [BoxShadow(color: p.primary.withValues(alpha: 0.45), blurRadius: 40, offset: const Offset(0, 16))],
+    return Column(children: [
+      Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(28),
+          boxShadow: [BoxShadow(color: p.primary.withValues(alpha: 0.4), blurRadius: 40, offset: const Offset(0, 16))],
+        ),
+        child: Image.asset('assets/images/app_icon.png', package: 'chatters_shared', width: 104, height: 104),
       ),
-      child: const Icon(Icons.forum_rounded, color: Colors.white, size: 44),
-    );
+      const SizedBox(height: 12),
+      const GradientText('Chatters',
+          gradient: LinearGradient(colors: [Color(0xff1d6fe8), Color(0xff43b649)]),
+          style: TextStyle(fontSize: 22, fontWeight: FontWeight.w800, letterSpacing: 0.3)),
+    ]);
   }
 }

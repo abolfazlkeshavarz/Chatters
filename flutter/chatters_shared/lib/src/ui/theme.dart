@@ -18,6 +18,8 @@ class Accent {
 }
 
 const accents = [
+  // The logo's own blue-to-green.
+  Accent('Chatters', Color(0xff1d6fe8), Color(0xff43b649)),
   Accent('Aurora', Color(0xff7c3aed), Color(0xffec4899)),
   Accent('Ocean', Color(0xff2563eb), Color(0xff06b6d4)),
   Accent('Sunset', Color(0xfff97316), Color(0xffe11d48)),

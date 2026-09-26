@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../api/endpoints.dart';
+import '../storage.dart';
 import 'chat_socket.dart';
 import 'notifications.dart';
 
@@ -123,6 +124,43 @@ class ContactsStore extends ChangeNotifier {
       await removeContact(id);
     } finally {
       await load();
+    }
+  }
+}
+
+/// The developer's profile and news, with an "unread" flag driven by the
+/// server's latest_at versus the last time this device opened the page.
+class DeveloperStore extends ChangeNotifier {
+  DeveloperStore._();
+  static final DeveloperStore instance = DeveloperStore._();
+
+  static const _seenKey = 'dev.seen';
+
+  Map<String, dynamic> profile = {};
+  List<Map<String, dynamic>> posts = [];
+  bool loading = true;
+  bool unread = false;
+  String? _latest;
+
+  Future<void> load() async {
+    try {
+      final d = await getDeveloperInfo();
+      profile = (d['profile'] as Map?)?.cast<String, dynamic>() ?? {};
+      posts = ((d['posts'] as List?) ?? []).cast<Map<String, dynamic>>();
+      _latest = d['latest_at'] as String?;
+      final seen = await Storage.readRaw(_seenKey);
+      final hasContent = posts.isNotEmpty || '${profile['name'] ?? ''}'.isNotEmpty;
+      unread = hasContent && _latest != null && _latest != seen;
+    } catch (_) {}
+    loading = false;
+    notifyListeners();
+  }
+
+  Future<void> markSeen() async {
+    if (_latest != null) await Storage.writeRaw(_seenKey, _latest);
+    if (unread) {
+      unread = false;
+      notifyListeners();
     }
   }
 }

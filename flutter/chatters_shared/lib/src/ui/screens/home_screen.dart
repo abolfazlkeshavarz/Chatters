@@ -63,6 +63,27 @@ class _HomeScreenState extends State<HomeScreen> {
                         Icon(_tab == i ? _items[i].$2 : _items[i].$1,
                             color: _tab == i ? Colors.white : p.subtext, size: 24),
                         if (i == 0) const PositionedDirectional(end: -10, top: -6, child: _UnreadDot()),
+                        if (i == 2)
+                          PositionedDirectional(
+                            end: -3,
+                            top: -2,
+                            child: ListenableBuilder(
+                              listenable: DeveloperStore.instance,
+                              builder: (_, __) => AnimatedScale(
+                                scale: DeveloperStore.instance.unread ? 1 : 0,
+                                duration: const Duration(milliseconds: 250),
+                                child: Container(
+                                  width: 10,
+                                  height: 10,
+                                  decoration: BoxDecoration(
+                                    color: p.danger,
+                                    shape: BoxShape.circle,
+                                    border: Border.all(color: p.surface, width: 1.5),
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ),
                       ]),
                       AnimatedSize(
                         duration: const Duration(milliseconds: 300),

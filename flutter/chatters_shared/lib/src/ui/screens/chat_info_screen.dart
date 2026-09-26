@@ -187,6 +187,8 @@ class _ChatInfoScreenState extends State<ChatInfoScreen> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(children: [
+                if (!isGroup && !pending && other != null)
+                  _Quick(Icons.call_rounded, t('Call'), p.gradient, () => startCall(context, _id, other)),
                 _Quick(muted ? Icons.notifications_off_rounded : Icons.notifications_active_rounded,
                     muted ? t('Unmute') : t('Mute'), LinearGradient(colors: [p.warn, const Color(0xfffbbf24)]), _toggleMute),
                 if (isSecret && !pending)

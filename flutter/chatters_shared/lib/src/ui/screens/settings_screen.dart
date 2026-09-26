@@ -11,6 +11,10 @@ import '../widgets/avatar.dart';
 import '../widgets/common.dart';
 import '../widgets/design.dart';
 import '../widgets/language_picker.dart';
+import '../../services/stores.dart';
+import 'developer_screen.dart';
+import 'server_screen.dart';
+import 'sessions_screen.dart';
 import '../l10n.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -237,6 +241,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ]),
               ),
               SettingsTile(
+                icon: Icons.devices_rounded,
+                title: t('Active sessions'),
+                subtitle: t('Devices signed in to your account'),
+                gradient: const LinearGradient(colors: [Color(0xff0ea5e9), Color(0xff6366f1)]),
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SessionsScreen())),
+              ),
+              SettingsTile(
                 icon: _hasKey ? Icons.verified_user_rounded : Icons.gpp_maybe_rounded,
                 title: t('End-to-end encryption'),
                 subtitle: _hasKey ? t('Your key is safely stored on this device') : t('No key on this device — sign in again'),
@@ -253,10 +264,30 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ]),
             SectionCard(title: t('About'), children: [
+              ListenableBuilder(
+                listenable: DeveloperStore.instance,
+                builder: (context, _) => SettingsTile(
+                  icon: Icons.campaign_rounded,
+                  title: t('Developer & news'),
+                  subtitle: t('Updates and contact info from the developer'),
+                  gradient: const LinearGradient(colors: [Color(0xff1d6fe8), Color(0xff43b649)]),
+                  trailing: Row(mainAxisSize: MainAxisSize.min, children: [
+                    if (DeveloperStore.instance.unread)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(color: p.danger, borderRadius: BorderRadius.circular(10)),
+                        child: Text(t('New'), style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w800)),
+                      ),
+                    Icon(Icons.chevron_right_rounded, color: p.subtext),
+                  ]),
+                  onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const DeveloperScreen())),
+                ),
+              ),
               SettingsTile(
                 icon: Icons.dns_rounded,
                 title: t('Server'),
                 subtitle: apiBase.replaceFirst(RegExp(r'^https?://'), ''),
+                onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const ServerScreen())),
                 gradient: const LinearGradient(colors: [Color(0xff2563eb), Color(0xff06b6d4)]),
               ),
               SettingsTile(

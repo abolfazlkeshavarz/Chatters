@@ -51,6 +51,31 @@ license only allows those fonts on Apple platforms, so Android uses the closest
 open-source equivalents, bundled in `chatters_shared/assets/fonts` (SIL OFL):
 Inter, which is designed in the same style as SF, and Vazirmatn for Persian.
 
+**Voice calls (1:1).** WebRTC audio, phone to phone, encrypted by WebRTC
+(DTLS-SRTP). The backend only relays signaling over the existing WebSocket
+(`Chatters/internal/websocket/calls.go`) and hands out ICE servers from
+`GET /api/calls/ice-servers`. Mobile networks usually need a TURN relay: enable
+the `coturn` service as described in the "voice calls" block of `.env.example`
+(`COMPOSE_PROFILES=calls`, `TURN_EXTERNAL_IP`, `TURN_URLS`, `make secrets`, open
+3478 and 49160–49260/udp). Calls ring while the app is open or recently
+backgrounded; ringing a fully closed app needs push (FCM / PushKit), not done
+yet. Call button: chat header and chat info. Minimise the call screen and a
+green bar lets you return to it.
+
+**Active sessions.** Settings → Privacy & security → Active sessions lists
+every signed-in device (name, IP, last activity) and can sign one or all
+others out. Backed by a `sessions` table; tokens carry a session id that the
+auth middleware checks on each request. Signing out ends the session on the
+server too.
+
+**Server address.** Change it from the chip on the sign-in screen or Settings →
+About → Server; it is tested against `/healthz` first. Switching signs you out.
+
+**Developer & news.** Settings → About → Developer & news shows your profile,
+contact buttons (email, phone, WhatsApp, Telegram, Instagram, GitHub,
+LinkedIn, X, website) and news posts, with a dot on the Settings tab when
+something is new. Edit it in the web admin panel → "Developer page".
+
 Administration is intentionally not in the apps; admins use the web panel.
 
 The crypto in `chatters_shared/lib/src/crypto/e2ee.dart` is tested against a

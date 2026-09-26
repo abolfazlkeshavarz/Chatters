@@ -93,3 +93,29 @@ Future<List<Map<String, dynamic>>> getAnnouncements() async {
 }
 
 Future<void> ackAnnouncement(int id) => Api.post('/api/announcements/${_e(id)}/ack');
+
+/* --------------------------------------------------------------- sessions */
+
+Future<List<Map<String, dynamic>>> getSessions() async {
+  final d = await Api.get('/api/sessions');
+  return ((d is Map ? d['sessions'] : null) as List? ?? []).cast<Map<String, dynamic>>();
+}
+
+Future<void> revokeSession(String id) => Api.del('/api/sessions/${_e(id)}');
+
+Future<int> revokeOtherSessions() async {
+  final d = await Api.post('/api/sessions/revoke-others');
+  return (d is Map ? d['revoked'] as int? : null) ?? 0;
+}
+
+/* ------------------------------------------------------------------ calls */
+
+Future<List<Map<String, dynamic>>> getIceServers() async {
+  final d = await Api.get('/api/calls/ice-servers');
+  return ((d is Map ? d['ice_servers'] : null) as List? ?? []).cast<Map<String, dynamic>>();
+}
+
+/* ---------------------------------------------------------- developer page */
+
+Future<Map<String, dynamic>> getDeveloperInfo() async =>
+    (await Api.get('/api/developer')) as Map<String, dynamic>;

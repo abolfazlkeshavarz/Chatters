@@ -1,5 +1,7 @@
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
+import 'config.dart';
+
 /// Session values (token, username, admin flag) kept in the iOS Keychain /
 /// Android Keystore-backed storage, hydrated into memory once at launch so the
 /// rest of the app can read them synchronously.
@@ -20,7 +22,10 @@ class Storage {
         _cache[k] = null;
       }
     }
+    setServerOverride(await readRaw(serverKey));
   }
+
+  static const serverKey = 'server.url';
 
   static String? get(String key) => _cache[key];
 

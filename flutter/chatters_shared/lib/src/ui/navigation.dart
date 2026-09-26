@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../api/endpoints.dart';
+import '../services/call_service.dart';
 import '../services/stores.dart';
+import 'screens/call_screen.dart';
 import 'screens/chat_screen.dart';
 import 'widgets/common.dart';
 import 'l10n.dart';
@@ -36,4 +38,25 @@ Future<void> openDirectChat(BuildContext context, String userId, {bool secret = 
   } catch (e) {
     if (context.mounted) toast(context, errText(e), error: true);
   }
+}
+
+void showCallScreen(BuildContext context) {
+  if (CallScreen.visible.value) return;
+  Navigator.of(context, rootNavigator: true).push(
+    PageRouteBuilder(
+      pageBuilder: (_, __, ___) => const CallScreen(),
+      transitionsBuilder: (_, a, __, child) => SlideTransition(
+        position: Tween(begin: const Offset(0, 1), end: Offset.zero)
+            .animate(CurvedAnimation(parent: a, curve: Curves.easeOutCubic)),
+        child: child,
+      ),
+    ),
+  );
+}
+
+/// Starts a voice call in a 1:1 chat (or returns to the one in progress).
+Future<void> startCall(BuildContext context, String chatId, String peer) async {
+  final call = CallService.instance;
+  if (!call.busy) call.start(chatId: chatId, peer: peer);
+  showCallScreen(context);
 }
