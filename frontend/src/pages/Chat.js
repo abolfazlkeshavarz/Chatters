@@ -6,6 +6,7 @@ import Avatar from "../components/Avatar";
 import MessageList from "../components/MessageList";
 import Composer from "../components/Composer";
 import ConnectionBanner from "../components/ConnectionBanner";
+import { callManager } from "../services/calls";
 
 /**
  * Standard (unencrypted) conversation. Messages are stored in cleartext and are
@@ -122,6 +123,17 @@ export default function Chat({
             بدون رمزنگاری
           </div>
         </div>
+
+        {!chat?.is_group && otherMember && (
+          <button
+            className="header-btn"
+            onClick={() => callManager.start(chatId, otherMember)}
+            title="تماس صوتی"
+            aria-label="تماس صوتی"
+          >
+            📞
+          </button>
+        )}
 
         <button
           className="header-btn"

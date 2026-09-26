@@ -6,6 +6,7 @@ import { isLoggedIn, logout } from "./api/auth";
 import { onSessionExpired } from "./api/client";
 import { chatSocket } from "./services/websocket";
 import UpdateBanner from "./components/UpdateBanner";
+import CallOverlay from "./components/CallOverlay";
 
 /**
  * Public signup is open, but it does not create an account: the form files a
@@ -98,6 +99,9 @@ export default function App() {
     <>
       <UpdateBanner />
       {screen}
+      {/* One call UI for the whole signed-in app, so a call keeps going
+          while you move between chats. */}
+      {loggedIn && <CallOverlay />}
     </>
   );
 }

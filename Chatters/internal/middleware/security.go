@@ -18,7 +18,7 @@ func SecurityHeaders() gin.HandlerFunc {
 		h.Set("X-Frame-Options", "DENY")
 		h.Set("Referrer-Policy", "no-referrer")
 		h.Set("Cross-Origin-Opener-Policy", "same-origin")
-		h.Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+		h.Set("Permissions-Policy", "geolocation=(), microphone=(self), camera=()")
 
 		if config.C.Production {
 			h.Set("Strict-Transport-Security", "max-age=31536000; includeSubDomains")

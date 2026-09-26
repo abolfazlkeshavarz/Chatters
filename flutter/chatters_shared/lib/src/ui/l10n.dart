@@ -336,7 +336,7 @@ const _persian = <String, String>{
   'Sign out?': 'خارج می‌شوید؟',
   'Your encryption key is removed from this device. Sign in again to read secret chats.':
       'کلید رمزنگاری از این دستگاه حذف می‌شود. برای خواندن گفتگوهای مخفی دوباره وارد شوید.',
-  'Chatters · made with 💜': 'چترز · ساخته‌شده با 💜',
+  'Chatters · safely chat :)': 'چترز · امن گفتگو کن :)',
   'Encryption ready': 'رمزنگاری آماده است',
   'Encryption key missing': 'کلید رمزنگاری موجود نیست',
   'Fill in both fields': 'هر دو فیلد را پر کنید',
@@ -630,7 +630,7 @@ const _italian = <String, String>{
   'Sign out?': 'Uscire?',
   'Your encryption key is removed from this device. Sign in again to read secret chats.':
       'La chiave di crittografia viene rimossa da questo dispositivo. Accedi di nuovo per leggere le chat segrete.',
-  'Chatters · made with 💜': 'Chatters · fatto con 💜',
+  'Chatters · safely chat :)': 'Chatters · chatta in sicurezza :)',
   'Encryption ready': 'Crittografia pronta',
   'Encryption key missing': 'Chiave di crittografia mancante',
   'Fill in both fields': 'Compila entrambi i campi',

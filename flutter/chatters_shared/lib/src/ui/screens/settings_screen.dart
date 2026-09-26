@@ -304,7 +304,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ]),
             const SizedBox(height: 24),
-            Center(child: Text(t('Chatters · made with 💜'), style: TextStyle(color: p.subtext, fontSize: 12))),
+            Center(child: Text(t('Chatters · safely chat :)'), style: TextStyle(color: p.subtext, fontSize: 12))),
           ],
         ),
       ),

@@ -16,6 +16,7 @@ import MessageList from "../components/MessageList";
 import Composer from "../components/Composer";
 import ConnectionBanner from "../components/ConnectionBanner";
 import Modal from "../components/Modal";
+import { callManager } from "../services/calls";
 
 // The self-destruct menu; must match the server's allowlist.
 const TIMER_OPTIONS = [
@@ -251,6 +252,7 @@ export default function SecureChat({
   /* ----------------------------------------------------------------- active */
 
   const blocked = Boolean(setupError) || !identity || !recipients;
+  const peer = (chat?.members || []).find((m) => m !== me);
 
   return (
     <div className="pane">
@@ -273,6 +275,17 @@ export default function SecureChat({
             {selfDestruct > 0 && ` · 🔥 ${timerLabel(selfDestruct)}`}
           </div>
         </div>
+
+        {!chat?.is_group && peer && (
+          <button
+            className="header-btn"
+            onClick={() => callManager.start(chatId, peer)}
+            title="تماس صوتی"
+            aria-label="تماس صوتی"
+          >
+            📞
+          </button>
+        )}
 
         {chat?.is_secret && (
           <button
