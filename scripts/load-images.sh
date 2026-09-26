@@ -13,12 +13,9 @@ cd "$(dirname "$0")/.."
 
 BUNDLE="${1:-}"
 if [[ -z "$BUNDLE" ]]; then
-  for candidate in chatters-images.tar.gz dist/chatters-images.tar.gz; do
-    if [[ -f "$candidate" ]]; then
-      BUNDLE="$candidate"
-      break
-    fi
-  done
+  # Newest of the full or per-service bundles, in the project root or dist/.
+  BUNDLE="$(ls -t chatters-images.tar.gz chatters-backend.tar.gz chatters-frontend.tar.gz \
+    dist/chatters-images.tar.gz dist/chatters-backend.tar.gz dist/chatters-frontend.tar.gz 2>/dev/null | head -1 || true)"
 fi
 
 if [[ -z "$BUNDLE" || ! -f "$BUNDLE" ]]; then
@@ -32,7 +29,7 @@ if [[ -z "$BUNDLE" || ! -f "$BUNDLE" ]]; then
 fi
 
 echo "==> Loading images from ${BUNDLE}"
-gunzip -c "$BUNDLE" | docker load
+LOADED="$(gunzip -c "$BUNDLE" | docker load | tee /dev/stderr | sed -n 's/^Loaded image: //p')"
 
 echo ""
 echo "==> Checking the images match this machine's architecture"
@@ -45,7 +42,17 @@ case "$host_arch" in
   aarch64|arm64)  host_arch=arm64 ;;
 esac
 
+# Only the images this bundle carried (a per-service bundle has just one).
+CHECK=()
 for img in chatters-backend:latest chatters-frontend:latest; do
+  grep -qx "$img" <<<"$LOADED" && CHECK+=("$img")
+done
+if [[ ${#CHECK[@]} -eq 0 ]]; then
+  echo "Error: the bundle did not contain chatters-backend or chatters-frontend." >&2
+  exit 1
+fi
+
+for img in "${CHECK[@]}"; do
   got="$(docker image inspect "$img" --format '{{.Architecture}}' 2>/dev/null || echo missing)"
   if [[ "$got" == "missing" ]]; then
     echo "Error: ${img} is not present after loading the bundle." >&2

@@ -118,6 +118,28 @@ Health endpoint for load balancers: `GET /healthz` → `{"status":"ok"}`.
 
 ---
 
+## Updating only one part
+
+When a change touches only the backend or only the web frontend, rebuild and
+restart just that service. `--no-deps` keeps the database, Redis, coturn and
+the other service running untouched.
+
+| Changed | Building on the server | Building on your machine (small server) |
+| --- | --- | --- |
+| Backend (Go, incl. migrations) | `make update-backend` | `make build-images-backend`, copy `dist/chatters-backend.tar.gz` over, then `make update-backend-prebuilt` on the server |
+| Web frontend | `make update-frontend` | `make build-images-frontend`, copy `dist/chatters-frontend.tar.gz` over, then `make update-frontend-prebuilt` |
+| Only the database schema | `make migrate` | (same; it uses the backend image already on the server) |
+
+Migrations run automatically every time the backend starts, so
+`update-backend` ships a schema change too. `make migrate` applies them on
+their own and exits; every migration is idempotent, so running it on an
+up-to-date database changes nothing.
+
+Also per service: `build-backend` / `build-frontend` (build the image only),
+`restart-backend` / `restart-frontend`, `logs-backend` / `logs-frontend`.
+The mobile apps are built separately by GitHub Actions and do not need any
+of these.
+
 ## Admin panel
 
 Sign in as the bootstrapped administrator and the **🛠️ مدیریت** tab appears. From there you can:

@@ -10,7 +10,13 @@
 # where the resources are and shipping the result sidesteps that entirely.
 #
 # Usage (on your own machine, from the project root):
-#   ./scripts/build-images.sh
+#   ./scripts/build-images.sh              both images -> dist/chatters-images.tar.gz
+#   ./scripts/build-images.sh backend      only the backend -> dist/chatters-backend.tar.gz
+#   ./scripts/build-images.sh frontend     only the frontend -> dist/chatters-frontend.tar.gz
+#
+# Building just the service you changed makes the bundle a fraction of the
+# size; on the server, load it and restart only that service (the Makefile's
+# update-backend-prebuilt / update-frontend-prebuilt).
 #
 # Options (environment variables):
 #   PLATFORM=linux/arm64   target architecture, if the server is not x86-64
@@ -22,16 +28,31 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 
 PLATFORM="${PLATFORM:-linux/amd64}"
-OUT="${OUT:-dist/chatters-images.tar.gz}"
 INCLUDE_BASE="${INCLUDE_BASE:-0}"
+
+SERVICES=()
+for arg in "$@"; do
+  case "$arg" in
+    backend|frontend) SERVICES+=("$arg") ;;
+    *) echo "Unknown service '$arg' (expected: backend, frontend)" >&2; exit 1 ;;
+  esac
+done
+[[ ${#SERVICES[@]} -eq 0 ]] && SERVICES=(backend frontend)
+
+if [[ ${#SERVICES[@]} -eq 1 ]]; then
+  OUT="${OUT:-dist/chatters-${SERVICES[0]}.tar.gz}"
+else
+  OUT="${OUT:-dist/chatters-images.tar.gz}"
+fi
 
 # Read from the compose file rather than hardcoded, so these stay correct if
 # the base image versions there are ever bumped.
 BASE_IMAGES=(postgres:16-alpine redis:7-alpine)
 
-IMAGES=(chatters-backend:latest chatters-frontend:latest)
+IMAGES=()
+for svc in "${SERVICES[@]}"; do IMAGES+=("chatters-${svc}:latest"); done
 
-echo "==> Building images for ${PLATFORM}"
+echo "==> Building ${SERVICES[*]} for ${PLATFORM}"
 echo ""
 
 # A .env has to exist for compose to interpolate the file at all (JWT_SECRET
@@ -52,7 +73,7 @@ fi
 cleanup() { [[ "$TEMP_ENV" == "1" ]] && rm -f .env; }
 trap cleanup EXIT
 
-DOCKER_DEFAULT_PLATFORM="$PLATFORM" docker compose build
+DOCKER_DEFAULT_PLATFORM="$PLATFORM" docker compose build "${SERVICES[@]}"
 
 echo ""
 echo "==> Verifying the built images really are ${PLATFORM}"
@@ -99,10 +120,15 @@ echo "Next, copy it to the server and load it there:"
 echo ""
 echo "  scp ${OUT} YOUR_USER@YOUR_SERVER:/opt/chatters/"
 echo "  ssh YOUR_USER@YOUR_SERVER"
-echo "  cd /opt/chatters && ./scripts/load-images.sh"
+if [[ ${#SERVICES[@]} -eq 1 ]]; then
+  echo "  cd /opt/chatters && make update-${SERVICES[0]}-prebuilt"
+  echo "  (loads the bundle and restarts only the ${SERVICES[0]}; nothing else is touched)"
+else
+  echo "  cd /opt/chatters && ./scripts/load-images.sh"
+fi
 echo ""
 if [[ "$INCLUDE_BASE" != "1" ]]; then
-  echo "This bundle contains only the two images that must be built."
+  echo "This bundle contains only the image(s) that must be built."
   echo "postgres and redis are pulled from Docker Hub on the server — note that"
   echo "postgres:16-alpine is very likely already present there if another"
   echo "project uses it. If the server cannot reach Docker Hub at all, rebuild"

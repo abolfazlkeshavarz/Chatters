@@ -65,6 +65,7 @@ func printVAPIDKeys() {
 func main() {
 	probe := flag.Bool("healthcheck", false, "probe the running server and exit")
 	vapid := flag.Bool("vapid", false, "print a fresh Web Push VAPID key pair and exit")
+	migrateOnly := flag.Bool("migrate", false, "apply database migrations (and the admin bootstrap), then exit")
 	flag.Parse()
 	if *probe {
 		healthcheck()
@@ -91,6 +92,13 @@ func main() {
 	}
 	if err := db.BootstrapAdmin(); err != nil {
 		log.Fatalf("admin bootstrap failed: %v", err)
+	}
+	// "make migrate": the same steps every boot runs, without serving. Every
+	// statement is idempotent, so running it against an up-to-date database
+	// is a no-op.
+	if *migrateOnly {
+		log.Println("migrations applied")
+		return
 	}
 
 	// Runs for the life of the process; the ticker is stopped by the goroutine

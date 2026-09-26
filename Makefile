@@ -1,7 +1,10 @@
 .PHONY: help env preflight secrets vapid up lan certs https tunnel down restart build logs ps clean db-shell backend-shell \
         test backend-test frontend-test backend-build frontend-install frontend-build \
         bootstrap check-ports nginx nginx-config install-docker mirrors mirrors-go mirrors-npm \
-        build-images load-images up-prebuilt
+        build-images load-images up-prebuilt \
+        update-backend update-frontend migrate build-backend build-frontend \
+        restart-backend restart-frontend logs-backend logs-frontend \
+        build-images-backend build-images-frontend update-backend-prebuilt update-frontend-prebuilt
 
 COMPOSE = docker compose
 
@@ -21,7 +24,7 @@ GO_PROXY := https://package-mirror.liara.ir/repository/go/
 NPM_REGISTRY_MIRROR := https://package-mirror.liara.ir/repository/npm/
 
 help: ## Show this help
-	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-18s\033[0m %s\n", $$1, $$2}'
+	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | sort | awk 'BEGIN {FS = ":.*?## "}; {printf "\033[36m%-26s\033[0m %s\n", $$1, $$2}'
 	@echo ""
 	@echo "  VPS quick start (from scratch, or alongside another project): make bootstrap"
 	@echo "  VPS quick start (manual):  make env -> make secrets -> edit .env -> make up"
@@ -165,6 +168,68 @@ db-shell: ## Open psql inside the running database container
 
 backend-shell: ## Open a shell inside the running backend container
 	$(COMPOSE) exec backend sh
+
+## --- Updating one part (everything else keeps running) ---
+#
+# For when only one side changed. --no-deps stops compose from recreating the
+# database, Redis or the other service, so they keep running untouched and
+# nobody else's connection drops. The backend applies pending migrations
+# every time it starts, so update-backend is also how a schema change ships.
+
+update-backend: env ## Rebuild and restart ONLY the backend (runs its migrations on start)
+	env -u HTTP_PORT $(COMPOSE) up -d --build --no-deps --wait backend
+	@$(COMPOSE) ps backend
+
+update-frontend: env ## Rebuild and restart ONLY the web frontend
+	env -u HTTP_PORT $(COMPOSE) up -d --build --no-deps --wait frontend
+	@$(COMPOSE) ps frontend
+
+# Migrations also run on every backend start; this is for running them on
+# their own (e.g. before switching traffic, or to check they apply cleanly).
+# Uses the backend image as it is now - run update-backend / build-backend
+# first if the migration is new code.
+migrate: env ## Apply database migrations only, with the current backend image
+	env -u HTTP_PORT $(COMPOSE) run --rm backend -migrate
+
+build-backend: env ## Build the backend image only (nothing is restarted)
+	$(COMPOSE) build backend
+
+build-frontend: env ## Build the frontend image only (nothing is restarted)
+	$(COMPOSE) build frontend
+
+restart-backend: ## Restart only the backend container, without rebuilding
+	$(COMPOSE) restart backend
+
+restart-frontend: ## Restart only the frontend container, without rebuilding
+	$(COMPOSE) restart frontend
+
+logs-backend: ## Follow backend logs only
+	$(COMPOSE) logs -f backend
+
+logs-frontend: ## Follow frontend logs only
+	$(COMPOSE) logs -f frontend
+
+## --- Updating one part, built elsewhere (small servers) ---
+
+build-images-backend: ## [dev machine] Build ONLY the backend -> dist/chatters-backend.tar.gz
+	@bash scripts/build-images.sh backend
+
+build-images-frontend: ## [dev machine] Build ONLY the frontend -> dist/chatters-frontend.tar.gz
+	@bash scripts/build-images.sh frontend
+
+update-backend-prebuilt: env ## [server] Load chatters-backend.tar.gz and restart only the backend
+	@bundle="$$(ls -t chatters-backend.tar.gz dist/chatters-backend.tar.gz 2>/dev/null | head -1)"; \
+	if [ -z "$$bundle" ]; then echo "chatters-backend.tar.gz not found - copy it here from 'make build-images-backend'"; exit 1; fi; \
+	bash scripts/load-images.sh "$$bundle"
+	env -u HTTP_PORT $(COMPOSE) up -d --no-build --no-deps --wait backend
+	@$(COMPOSE) ps backend
+
+update-frontend-prebuilt: env ## [server] Load chatters-frontend.tar.gz and restart only the frontend
+	@bundle="$$(ls -t chatters-frontend.tar.gz dist/chatters-frontend.tar.gz 2>/dev/null | head -1)"; \
+	if [ -z "$$bundle" ]; then echo "chatters-frontend.tar.gz not found - copy it here from 'make build-images-frontend'"; exit 1; fi; \
+	bash scripts/load-images.sh "$$bundle"
+	env -u HTTP_PORT $(COMPOSE) up -d --no-build --no-deps --wait frontend
+	@$(COMPOSE) ps frontend
 
 ## --- Tests ---
 
