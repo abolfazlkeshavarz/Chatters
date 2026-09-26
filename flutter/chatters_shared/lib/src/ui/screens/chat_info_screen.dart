@@ -108,7 +108,7 @@ class _ChatInfoScreenState extends State<ChatInfoScreen> {
       context,
       group ? t('Leave this group?') : t('Delete this chat?'),
       secret
-          ? t('The secret chat is deleted for both of you. This cannot be undone.')
+          ? t('This chat will be deleted for both of you.')
           : group
               ? t('You will stop receiving its messages.')
               : t('It disappears from your list. The other person keeps their copy.'),

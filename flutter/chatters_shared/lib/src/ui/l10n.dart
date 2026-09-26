@@ -183,8 +183,7 @@ const _persian = <String, String>{
   // chat list
   'Leave this group?': 'از این گروه خارج می‌شوید؟',
   'Delete this chat?': 'این گفتگو حذف شود؟',
-  'The secret chat is deleted for both of you. This cannot be undone.':
-      'گفتگوی مخفی برای هر دو نفر حذف می‌شود. این کار برگشت‌پذیر نیست.',
+  'This chat will be deleted for both of you.': 'این گفتگو برای هر دو نفر حذف خواهد شد.',
   'You will stop receiving its messages.': 'دیگر پیام‌های آن را دریافت نمی‌کنید.',
   'It disappears from your list. The other person keeps their copy.':
       'از فهرست شما حذف می‌شود. نسخهٔ طرف مقابل باقی می‌ماند.',
@@ -477,8 +476,7 @@ const _italian = <String, String>{
   // chat list
   'Leave this group?': 'Uscire da questo gruppo?',
   'Delete this chat?': 'Eliminare questa chat?',
-  'The secret chat is deleted for both of you. This cannot be undone.':
-      'La chat segreta verrà eliminata per entrambi. L’azione è irreversibile.',
+  'This chat will be deleted for both of you.': 'Questa chat verrà eliminata per entrambi.',
   'You will stop receiving its messages.': 'Non riceverai più i suoi messaggi.',
   'It disappears from your list. The other person keeps their copy.':
       'Scompare dal tuo elenco. L’altra persona conserva la sua copia.',
