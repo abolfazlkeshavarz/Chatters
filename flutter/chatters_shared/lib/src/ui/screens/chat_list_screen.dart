@@ -1,38 +1,36 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:intl/intl.dart';
 
 import '../../api/endpoints.dart';
 import '../../services/auth.dart';
 import '../../services/chat_socket.dart';
-import '../../services/notifications.dart';
+import '../../services/stores.dart';
+import '../navigation.dart';
 import '../theme.dart';
 import '../widgets/avatar.dart';
 import '../widgets/common.dart';
 import '../widgets/connection_banner.dart';
-import 'chat_screen.dart';
+import '../widgets/design.dart';
+import 'new_chat_sheet.dart';
 
-String chatTitle(Map<String, dynamic> chat, String? me) {
-  final others = ((chat['members'] as List?) ?? []).cast<String>().where((u) => u != me).toList();
-  if (chat['is_group'] == true) {
-    final name = chat['name'] as String?;
-    return (name != null && name.isNotEmpty) ? name : (others.isEmpty ? 'Group' : others.join(', '));
-  }
-  return others.isNotEmpty ? others.first : 'Saved messages';
-}
-
-String _formatTime(String? ts) {
+String relativeTime(String? ts) {
   final d = ts == null ? null : DateTime.tryParse(ts)?.toLocal();
   if (d == null) return '';
-  final diff = DateTime.now().difference(d);
-  if (diff.inMinutes < 1) return 'Just now';
+  final now = DateTime.now();
+  final diff = now.difference(d);
+  if (diff.inMinutes < 1) return 'now';
   if (diff.inMinutes < 60) return '${diff.inMinutes}m';
-  if (diff.inDays == 0) return DateFormat.Hm().format(d);
-  if (diff.inDays == 1) return 'Yesterday';
-  if (diff.inDays < 7) return DateFormat.E().format(d);
+  final today = DateTime(now.year, now.month, now.day);
+  final day = DateTime(d.year, d.month, d.day);
+  final days = today.difference(day).inDays;
+  if (days == 0) return DateFormat.Hm().format(d);
+  if (days == 1) return 'Yesterday';
+  if (days < 7) return DateFormat.E().format(d);
   return DateFormat.MMMd().format(d);
 }
+
+enum _Filter { all, unread, groups, secret }
 
 class ChatListScreen extends StatefulWidget {
   const ChatListScreen({super.key});
@@ -41,161 +39,71 @@ class ChatListScreen extends StatefulWidget {
 }
 
 class _ChatListScreenState extends State<ChatListScreen> {
-  List<Map<String, dynamic>> _chats = [];
-  List<Map<String, dynamic>> _contacts = [];
-  bool _loading = true;
-  String _error = '';
+  final _store = ChatsStore.instance;
+  final _search = TextEditingController();
+  String _query = '';
+  _Filter _filter = _Filter.all;
   SocketStatus _status = ChatSocket.instance.status;
-  final List<StreamSubscription> _subs = [];
-  Timer? _debounce;
-
-  static const _refreshTypes = {
-    'message', 'media', 'deleted', 'chat_deleted', 'e2e_request', 'e2e_accepted', 'e2e_rejected', 'timer',
-  };
 
   @override
   void initState() {
     super.initState();
-    _load();
-    _loadContacts();
-    _subs.add(ChatSocket.instance.messages.listen((m) {
-      if (_refreshTypes.contains(m['type'])) _scheduleLoad();
-    }));
-    _subs.add(ChatSocket.instance.reconnected.listen((_) => _load()));
-    _subs.add(ChatSocket.instance.statusStream.listen((s) => setState(() => _status = s)));
+    ChatSocket.instance.statusStream.listen((s) {
+      if (mounted) setState(() => _status = s);
+    });
   }
 
-  void _scheduleLoad() {
-    _debounce?.cancel();
-    _debounce = Timer(const Duration(milliseconds: 300), _load);
+  List<Map<String, dynamic>> _visible(String? me) {
+    return _store.chats.where((c) {
+      final unread = ((c['unread_count'] as int?) ?? 0) > 0;
+      final ok = switch (_filter) {
+        _Filter.all => true,
+        _Filter.unread => unread,
+        _Filter.groups => c['is_group'] == true,
+        _Filter.secret => c['is_secret'] == true,
+      };
+      if (!ok) return false;
+      if (_query.isEmpty) return true;
+      final q = _query.toLowerCase();
+      return chatTitle(c, me).toLowerCase().contains(q) ||
+          ((c['members'] as List?) ?? []).any((m) => '$m'.toLowerCase().contains(q));
+    }).toList();
   }
 
-  @override
-  void dispose() {
-    _debounce?.cancel();
-    for (final s in _subs) {
-      s.cancel();
-    }
-    super.dispose();
-  }
-
-  Future<List<Map<String, dynamic>>> _load() async {
-    try {
-      final list = await getChats();
-      Notifications.instance.mutedChats
-        ..clear()
-        ..addAll(list.where((c) => c['muted'] == true).map((c) => c['id'] as String));
-      if (mounted) {
-        setState(() {
-          _chats = list;
-          _error = '';
-        });
-      }
-      return list;
-    } catch (e) {
-      if (mounted) setState(() => _error = e.toString());
-      return [];
-    } finally {
-      if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _loadContacts() async {
-    try {
-      final c = await getContacts();
-      if (mounted) setState(() => _contacts = c);
-    } catch (_) {}
-  }
-
-  Future<void> _open(Map<String, dynamic> chat) async {
-    await Navigator.push(context, MaterialPageRoute(builder: (_) => ChatScreen(chat: chat)));
-    _load();
-  }
-
-  Future<void> _confirmDelete(Map<String, dynamic> chat) async {
+  Future<void> _delete(Map<String, dynamic> chat) async {
     final secret = chat['is_secret'] == true;
     final group = chat['is_group'] == true;
     final ok = await confirm(
       context,
-      group ? 'Leave group?' : 'Delete chat?',
+      group ? 'Leave this group?' : 'Delete this chat?',
       secret
-          ? 'This deletes the secret chat for both of you. Cannot be undone.'
+          ? 'The secret chat is deleted for both of you. This cannot be undone.'
           : group
               ? 'You will stop receiving its messages.'
-              : 'Removes it from your list. The other person keeps their copy.',
-      ok: group ? 'Leave' : 'Delete',
+              : 'It disappears from your list. The other person keeps their copy.',
+      ok: group ? 'Leave group' : 'Delete chat',
       destructive: true,
     );
     if (!ok) return;
-    setState(() => _chats.removeWhere((c) => c['id'] == chat['id']));
+    _store.remove(chat['id'] as String);
     try {
       await deleteChat(chat['id'] as String, scope: secret ? 'everyone' : 'me');
-    } catch (_) {
-      _load();
+    } catch (e) {
+      if (mounted) toast(context, errText(e), error: true);
+      _store.load();
     }
   }
 
-  Future<void> _create(List<String> members, {bool group = false, String name = '', bool secret = false}) async {
-    final res = secret ? await createSecretChat(members.first) : await createChat(members, group, name);
-    final id = res['chat_id'];
-    final fresh = await _load();
-    if (!mounted) return;
-    Navigator.pop(context);
-    final created = fresh.where((c) => c['id'] == id).firstOrNull;
-    if (created != null) _open(created);
-  }
-
-  void _showMenu() {
-    _loadContacts();
-    showModalBottomSheet(
-      context: context,
-      showDragHandle: true,
-      builder: (c) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(leading: const Text('👤', style: TextStyle(fontSize: 20)), title: const Text('Contacts'),
-              onTap: () { Navigator.pop(c); _showContacts(); }),
-          ListTile(leading: const Text('💬', style: TextStyle(fontSize: 20)), title: const Text('New chat'),
-              onTap: () { Navigator.pop(c); _pickContacts('direct'); }),
-          ListTile(leading: const Text('🔒', style: TextStyle(fontSize: 20)), title: const Text('New secret chat'),
-              onTap: () { Navigator.pop(c); _pickContacts('secret'); }),
-          ListTile(leading: const Text('👥', style: TextStyle(fontSize: 20)), title: const Text('New group'),
-              onTap: () { Navigator.pop(c); _pickContacts('group'); }),
-        ]),
-      ),
-    );
-  }
-
-  void _showContacts() {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (c) => _ContactsSheet(
-        contacts: _contacts,
-        onChanged: () async {
-          await _loadContacts();
-          return _contacts;
-        },
-      ),
-    );
-  }
-
-  void _pickContacts(String mode) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (c) => _PickSheet(
-        mode: mode,
-        contacts: _contacts,
-        onAddContact: () {
-          Navigator.pop(c);
-          _showContacts();
-        },
-        onCreate: (members, name) =>
-            _create(members, group: mode == 'group', name: name, secret: mode == 'secret'),
-      ),
-    );
+  Future<void> _toggleMute(Map<String, dynamic> chat) async {
+    final id = chat['id'] as String;
+    final next = chat['muted'] != true;
+    _store.patch(id, {'muted': next});
+    toast(context, next ? 'Notifications muted' : 'Notifications on');
+    try {
+      await setChatMute(id, next);
+    } catch (_) {
+      _store.patch(id, {'muted': !next});
+    }
   }
 
   @override
@@ -203,136 +111,418 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final p = context.p;
     final me = Auth.instance.user;
     return Scaffold(
-      appBar: AppBar(
-        title: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          const Text('Chats', style: TextStyle(fontWeight: FontWeight.w700)),
-          Text('Logged in as $me', style: TextStyle(fontSize: 12, color: p.subtext)),
-        ]),
-      ),
-      floatingActionButton: FloatingActionButton(
-        backgroundColor: p.primary,
-        foregroundColor: Colors.white,
-        onPressed: _showMenu,
-        child: const Icon(Icons.edit),
-      ),
-      body: Column(children: [
-        ConnectionBanner(status: _status),
-        if (_error.isNotEmpty)
-          Padding(padding: const EdgeInsets.all(12), child: Text(_error, style: TextStyle(color: p.danger))),
-        Expanded(
-          child: _loading
-              ? const Center(child: CircularProgressIndicator())
-              : RefreshIndicator(
-                  onRefresh: () async {
-                    await Future.wait([_load(), _loadContacts()]);
-                  },
-                  child: _chats.isEmpty
-                      ? ListView(children: [
-                          const SizedBox(height: 80),
-                          const Center(child: Text('💬', style: TextStyle(fontSize: 40))),
-                          Center(child: Text('No chats yet', style: TextStyle(color: p.subtext))),
-                        ])
-                      : ListView.separated(
-                          padding: const EdgeInsets.fromLTRB(12, 12, 12, 88),
-                          itemCount: _chats.length,
-                          separatorBuilder: (_, __) => const SizedBox(height: 8),
-                          itemBuilder: (_, i) => _chatTile(_chats[i], me),
-                        ),
-                ),
+      floatingActionButton: Padding(
+        padding: const EdgeInsets.only(bottom: 84),
+        child: Pressable(
+          onTap: () => showNewChatSheet(context),
+          child: Container(
+            width: 60,
+            height: 60,
+            decoration: BoxDecoration(
+              gradient: p.gradient,
+              borderRadius: BorderRadius.circular(22),
+              boxShadow: [BoxShadow(color: p.primary.withValues(alpha: 0.45), blurRadius: 24, offset: const Offset(0, 10))],
+            ),
+            child: const Icon(Icons.edit_rounded, color: Colors.white, size: 26),
+          ),
         ),
-      ]),
+      ),
+      body: ListenableBuilder(
+        listenable: _store,
+        builder: (context, _) {
+          final list = _visible(me);
+          return RefreshIndicator(
+            edgeOffset: 120,
+            onRefresh: () async {
+              HapticFeedback.mediumImpact();
+              await Future.wait([_store.load(), _store.loadAnnouncements(), ContactsStore.instance.load()]);
+            },
+            child: CustomScrollView(
+              physics: const BouncingScrollPhysics(parent: AlwaysScrollableScrollPhysics()),
+              slivers: [
+                SliverAppBar(
+                  pinned: true,
+                  expandedHeight: 116,
+                  backgroundColor: p.bg.withValues(alpha: 0.92),
+                  flexibleSpace: const FlexibleSpaceBar(
+                    titlePadding: EdgeInsetsDirectional.only(start: 20, bottom: 14),
+                    title: GradientText('Messages',
+                        style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: -0.6)),
+                    background: AuroraBackground(intensity: 0.45),
+                  ),
+                  actions: [
+                    Padding(
+                      padding: const EdgeInsets.only(right: 16),
+                      child: UserAvatar(userId: me ?? '', size: 38),
+                    ),
+                  ],
+                ),
+                SliverToBoxAdapter(child: ConnectionBanner(status: _status)),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 8, 16, 4),
+                    child: TextField(
+                      controller: _search,
+                      onChanged: (v) => setState(() => _query = v.trim()),
+                      decoration: InputDecoration(
+                        hintText: 'Search chats',
+                        prefixIcon: const Icon(Icons.search_rounded),
+                        suffixIcon: _query.isEmpty
+                            ? null
+                            : IconButton(
+                                icon: const Icon(Icons.close_rounded),
+                                onPressed: () => setState(() {
+                                  _search.clear();
+                                  _query = '';
+                                }),
+                              ),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 12),
+                      ),
+                    ),
+                  ),
+                ),
+                SliverToBoxAdapter(child: _filters()),
+                if (_query.isEmpty && _filter == _Filter.all) SliverToBoxAdapter(child: _ContactsRail()),
+                if (_store.announcements.isNotEmpty && _query.isEmpty)
+                  SliverList.list(children: [
+                    for (final a in _store.announcements) _AnnouncementCard(a),
+                  ]),
+                if (_store.error.isNotEmpty && _store.chats.isEmpty)
+                  SliverToBoxAdapter(
+                    child: Padding(
+                      padding: const EdgeInsets.all(20),
+                      child: Text(errText(_store.error), style: TextStyle(color: p.danger)),
+                    ),
+                  ),
+                if (_store.loading)
+                  const SliverFillRemaining(child: Center(child: CircularProgressIndicator()))
+                else if (list.isEmpty)
+                  SliverFillRemaining(
+                    hasScrollBody: false,
+                    child: EmptyState(
+                      icon: _query.isNotEmpty ? Icons.search_off_rounded : Icons.forum_rounded,
+                      title: _query.isNotEmpty
+                          ? 'No matches'
+                          : _filter == _Filter.all
+                              ? 'No conversations yet'
+                              : 'Nothing here',
+                      message: _query.isNotEmpty
+                          ? 'Try a different name.'
+                          : 'Start a chat with someone from your contacts.',
+                      action: _filter == _Filter.all && _query.isEmpty
+                          ? SizedBox(
+                              width: 220,
+                              child: GradientButton(
+                                  label: 'Start a chat',
+                                  icon: Icons.add_rounded,
+                                  onPressed: () => showNewChatSheet(context)))
+                          : null,
+                    ),
+                  )
+                else
+                  SliverPadding(
+                    padding: const EdgeInsets.fromLTRB(12, 4, 12, 180),
+                    sliver: SliverList.builder(
+                      itemCount: list.length,
+                      itemBuilder: (_, i) => FadeSlideIn(
+                        key: ValueKey(list[i]['id']),
+                        index: i,
+                        child: _ChatTile(
+                          chat: list[i],
+                          me: me,
+                          onDelete: () => _delete(list[i]),
+                          onMute: () => _toggleMute(list[i]),
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          );
+        },
+      ),
     );
   }
 
-  Widget _chatTile(Map<String, dynamic> chat, String? me) {
+  Widget _filters() {
+    final p = context.p;
+    final unread = _store.chats.where((c) => ((c['unread_count'] as int?) ?? 0) > 0).length;
+    final items = [
+      (_Filter.all, 'All', null),
+      (_Filter.unread, 'Unread', unread > 0 ? '$unread' : null),
+      (_Filter.groups, 'Groups', null),
+      (_Filter.secret, 'Secret', null),
+    ];
+    return SizedBox(
+      height: 52,
+      child: ListView(
+        scrollDirection: Axis.horizontal,
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+        children: [
+          for (final (f, label, count) in items)
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: Pressable(
+                onTap: () => setState(() => _filter = f),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 250),
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    gradient: _filter == f ? p.gradient : null,
+                    color: _filter == f ? null : p.surfaceHigh,
+                    borderRadius: BorderRadius.circular(18),
+                  ),
+                  child: Row(children: [
+                    if (f == _Filter.secret) ...[
+                      Icon(Icons.lock_rounded, size: 14, color: _filter == f ? Colors.white : p.subtext),
+                      const SizedBox(width: 4),
+                    ],
+                    Text(label,
+                        style: TextStyle(
+                            color: _filter == f ? Colors.white : p.text,
+                            fontWeight: FontWeight.w600,
+                            fontSize: 13.5)),
+                    if (count != null) ...[
+                      const SizedBox(width: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                        decoration: BoxDecoration(
+                          color: _filter == f ? Colors.white.withValues(alpha: 0.25) : p.primary,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(count,
+                            style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w700)),
+                      ),
+                    ],
+                  ]),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+/* -------------------------------------------------------------- contacts rail */
+
+class _ContactsRail extends StatelessWidget {
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    return ListenableBuilder(
+      listenable: ContactsStore.instance,
+      builder: (context, _) {
+        final contacts = ContactsStore.instance.contacts;
+        if (contacts.isEmpty) return const SizedBox.shrink();
+        return SizedBox(
+          height: 100,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            itemCount: contacts.length,
+            itemBuilder: (_, i) {
+              final id = contacts[i]['id'] as String;
+              return FadeSlideIn(
+                index: i,
+                child: Pressable(
+                  onTap: () => openDirectChat(context, id),
+                  child: SizedBox(
+                    width: 74,
+                    child: Column(children: [
+                      const SizedBox(height: 6),
+                      UserAvatar(userId: id, size: 56, ring: true),
+                      const SizedBox(height: 6),
+                      Text(id,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(color: p.text, fontSize: 12, fontWeight: FontWeight.w500)),
+                    ]),
+                  ),
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+}
+
+/* --------------------------------------------------------------- announcements */
+
+Color? _hex(String? s) {
+  if (s == null) return null;
+  final h = s.replaceAll('#', '');
+  if (h.length != 6) return null;
+  final v = int.tryParse(h, radix: 16);
+  return v == null ? null : Color(0xff000000 | v);
+}
+
+class _AnnouncementCard extends StatelessWidget {
+  const _AnnouncementCard(this.a);
+  final Map<String, dynamic> a;
+
+  @override
+  Widget build(BuildContext context) {
+    final p = context.p;
+    final base = _hex(a['color'] as String?) ?? p.primary;
+    final fg = _hex(a['text_color'] as String?) ?? Colors.white;
+    final icon = (a['icon'] as String?)?.trim();
+    return FadeSlideIn(
+      child: Container(
+        margin: const EdgeInsets.fromLTRB(16, 6, 16, 6),
+        padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(colors: [base, Color.lerp(base, Colors.black, 0.25)!]),
+          borderRadius: BorderRadius.circular(22),
+          boxShadow: [BoxShadow(color: base.withValues(alpha: 0.3), blurRadius: 18, offset: const Offset(0, 8))],
+        ),
+        child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(icon == null || icon.isEmpty ? '📢' : icon, style: const TextStyle(fontSize: 24)),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              if ('${a['title'] ?? ''}'.isNotEmpty)
+                Text('${a['title']}', style: TextStyle(color: fg, fontWeight: FontWeight.w700, fontSize: 15)),
+              if ('${a['body'] ?? ''}'.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 2),
+                  child: Text('${a['body']}', style: TextStyle(color: fg.withValues(alpha: 0.9), height: 1.4)),
+                ),
+              if ('${a['author_label'] ?? ''}'.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(top: 6),
+                  child: Text('— ${a['author_label']}', style: TextStyle(color: fg.withValues(alpha: 0.75), fontSize: 12)),
+                ),
+            ]),
+          ),
+          if (a['dismissible'] != false)
+            IconButton(
+              visualDensity: VisualDensity.compact,
+              icon: Icon(Icons.close_rounded, color: fg),
+              onPressed: () => ChatsStore.instance.dismissAnnouncement(a['id'] as int),
+            ),
+        ]),
+      ),
+    );
+  }
+}
+
+/* ------------------------------------------------------------------ chat tile */
+
+class _ChatTile extends StatelessWidget {
+  const _ChatTile({required this.chat, required this.me, required this.onDelete, required this.onMute});
+  final Map<String, dynamic> chat;
+  final String? me;
+  final VoidCallback onDelete;
+  final VoidCallback onMute;
+
+  @override
+  Widget build(BuildContext context) {
     final p = context.p;
     final title = chatTitle(chat, me);
     final unreadCount = (chat['unread_count'] as int?) ?? 0;
     final unread = unreadCount > 0;
     final isGroup = chat['is_group'] == true;
     final isSecret = chat['is_secret'] == true;
+    final muted = chat['muted'] == true;
     final sender = chat['last_message_sender'] as String?;
     final last = chat['last_message'] as String?;
+    final pending = isSecret && chat['e2e_status'] == 'pending';
+    final timer = ((chat['self_destruct_seconds'] as int?) ?? 0) > 0;
 
-    String preview;
-    if (chat['last_is_encrypted'] == true) {
-      preview = '🔒 Encrypted message';
+    InlineSpan preview;
+    final subStyle = TextStyle(
+        color: unread ? p.text : p.subtext, fontWeight: unread ? FontWeight.w600 : FontWeight.w400, fontSize: 14);
+    if (pending) {
+      preview = TextSpan(
+          text: chat['e2e_requested_by'] == me ? 'Waiting for them to accept…' : 'Wants to start a secret chat',
+          style: subStyle.copyWith(color: p.secure, fontWeight: FontWeight.w600));
+    } else if (chat['last_is_encrypted'] == true) {
+      preview = TextSpan(children: [
+        WidgetSpan(child: Icon(Icons.lock_rounded, size: 14, color: p.secure)),
+        TextSpan(text: ' Encrypted message', style: subStyle),
+      ]);
     } else if (last != null && last.isNotEmpty) {
       final prefix = chat['last_is_system'] == true
           ? ''
           : sender == me
               ? 'You: '
               : (isGroup && sender != null ? '$sender: ' : '');
-      preview = prefix + last;
+      preview = TextSpan(children: [
+        if (prefix.isNotEmpty) TextSpan(text: prefix, style: subStyle.copyWith(color: p.primary, fontWeight: FontWeight.w600)),
+        TextSpan(text: last, style: subStyle),
+      ]);
     } else {
-      preview = 'No messages yet';
+      preview = TextSpan(text: 'No messages yet', style: subStyle.copyWith(fontStyle: FontStyle.italic));
     }
 
-    final flags = [
-      if (isSecret) 'secret' else if (isGroup) 'group',
-    ].join();
-
-    return Material(
-      color: unread ? p.unreadBg : p.card,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14), side: BorderSide(color: p.border, width: 0.5)),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: () => _open(chat),
-        onLongPress: () => _confirmDelete(chat),
-        child: Padding(
+    return Dismissible(
+      key: ValueKey('dismiss-${chat['id']}'),
+      confirmDismiss: (dir) async {
+        HapticFeedback.mediumImpact();
+        if (dir == DismissDirection.startToEnd) {
+          onMute();
+        } else {
+          onDelete();
+        }
+        return false;
+      },
+      background: _swipeBg(context, Alignment.centerLeft, muted ? Icons.notifications_active_rounded : Icons.notifications_off_rounded,
+          muted ? 'Unmute' : 'Mute', LinearGradient(colors: [p.warn, const Color(0xfffbbf24)])),
+      secondaryBackground: _swipeBg(context, Alignment.centerRight, Icons.delete_rounded, isGroup ? 'Leave' : 'Delete',
+          LinearGradient(colors: [const Color(0xfffb7185), p.danger])),
+      child: Pressable(
+        scale: 0.98,
+        onTap: () => openChat(context, chat),
+        onLongPress: () => _menu(context),
+        child: Container(
+          margin: const EdgeInsets.symmetric(vertical: 3),
           padding: const EdgeInsets.all(12),
+          decoration: BoxDecoration(
+            color: unread ? p.primary.withValues(alpha: p.dark ? 0.12 : 0.07) : Colors.transparent,
+            borderRadius: BorderRadius.circular(22),
+          ),
           child: Row(children: [
-            isGroup
-                ? CircleAvatar(
-                    radius: 23,
-                    backgroundColor: p.primary,
-                    child: Text(title.isEmpty ? '?' : title.characters.first.toUpperCase(),
-                        style: const TextStyle(color: Colors.white, fontSize: 18)),
-                  )
-                : UserAvatar(userId: title, size: 46),
-            const SizedBox(width: 12),
+            Hero(
+              tag: 'avatar-${chat['id']}',
+              child: UserAvatar(userId: title, size: 56, group: isGroup, ring: unread && !muted, secret: isSecret),
+            ),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                 Row(children: [
-                  Expanded(
-                    child: Text(
-                      '${chat['e2e_enabled'] == true || isSecret ? '🔒 ' : ''}$title'
-                      '${flags.isNotEmpty ? '  ·  $flags' : ''}'
-                      '${((chat['self_destruct_seconds'] as int?) ?? 0) > 0 ? '  🔥' : ''}'
-                      '${chat['muted'] == true ? '  🔕' : ''}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(color: p.text, fontWeight: FontWeight.w500),
-                    ),
-                  ),
-                  Text(_formatTime(chat['last_message_time'] as String?),
-                      style: TextStyle(fontSize: 12, color: p.subtext)),
-                ]),
-                if (isSecret && chat['e2e_status'] == 'pending')
-                  Text(
-                    chat['e2e_requested_by'] == me
-                        ? '🔒 Waiting for them to accept…'
-                        : '🔒 Wants to start a secret chat — tap to respond',
-                    style: TextStyle(fontSize: 12, color: p.secure),
-                  ),
-                const SizedBox(height: 2),
-                Row(children: [
-                  Expanded(
-                    child: Text(preview,
+                  Flexible(
+                    child: Text(title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                            fontSize: 13,
-                            color: unread ? p.text : p.subtext,
-                            fontWeight: unread ? FontWeight.w600 : FontWeight.w400)),
+                        style: TextStyle(color: p.text, fontWeight: FontWeight.w700, fontSize: 16)),
                   ),
-                  if (unread)
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(color: p.primary, borderRadius: BorderRadius.circular(10)),
-                      child: Text(unreadCount > 9 ? '9+' : '$unreadCount',
-                          style: const TextStyle(color: Colors.white, fontSize: 12)),
-                    ),
+                  if (timer) ...[const SizedBox(width: 4), Icon(Icons.local_fire_department_rounded, size: 16, color: p.warn)],
+                  if (muted) ...[const SizedBox(width: 4), Icon(Icons.notifications_off_rounded, size: 15, color: p.subtext)],
+                  const Spacer(),
+                  Text(relativeTime(chat['last_message_time'] as String?),
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: unread ? p.primary : p.subtext,
+                          fontWeight: unread ? FontWeight.w700 : FontWeight.w400)),
+                ]),
+                const SizedBox(height: 4),
+                Row(children: [
+                  Expanded(child: Text.rich(preview, maxLines: 1, overflow: TextOverflow.ellipsis)),
+                  AnimatedScale(
+                    scale: unread ? 1 : 0,
+                    duration: const Duration(milliseconds: 250),
+                    curve: Curves.easeOutBack,
+                    child: unread
+                        ? Padding(
+                            padding: const EdgeInsets.only(left: 8),
+                            child: GradientBadge(unreadCount > 99 ? '99+' : '$unreadCount', muted: muted),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
                 ]),
               ]),
             ),
@@ -341,177 +531,57 @@ class _ChatListScreenState extends State<ChatListScreen> {
       ),
     );
   }
-}
 
-/* ------------------------------------------------------------ sheets */
-
-class _ContactsSheet extends StatefulWidget {
-  const _ContactsSheet({required this.contacts, required this.onChanged});
-  final List<Map<String, dynamic>> contacts;
-  final Future<List<Map<String, dynamic>>> Function() onChanged;
-  @override
-  State<_ContactsSheet> createState() => _ContactsSheetState();
-}
-
-class _ContactsSheetState extends State<_ContactsSheet> {
-  late List<Map<String, dynamic>> _contacts = widget.contacts;
-  final _ctl = TextEditingController();
-  bool _busy = false;
-  String _err = '';
-
-  Future<void> _add() async {
-    final name = _ctl.text.trim();
-    if (name.isEmpty) return;
-    setState(() {
-      _busy = true;
-      _err = '';
-    });
-    try {
-      await addContact(name);
-      _ctl.clear();
-      _contacts = await widget.onChanged();
-    } catch (e) {
-      _err = e.toString();
-    }
-    if (mounted) setState(() => _busy = false);
-  }
-
-  Future<void> _remove(String id) async {
-    try {
-      await removeContact(id);
-      _contacts = await widget.onChanged();
-      if (mounted) setState(() {});
-    } catch (e) {
-      if (mounted) setState(() => _err = e.toString());
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.p;
-    return Padding(
-      padding: EdgeInsets.fromLTRB(16, 0, 16, MediaQuery.of(context).viewInsets.bottom + 16),
-      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text('Contacts', style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: p.text)),
-        const SizedBox(height: 12),
-        Row(children: [
-          Expanded(
-            child: TextField(
-              controller: _ctl,
-              autocorrect: false,
-              onSubmitted: (_) => _add(),
-              decoration: const InputDecoration(hintText: 'Add by username or phone'),
-            ),
-          ),
-          const SizedBox(width: 8),
-          FilledButton(onPressed: _busy ? null : _add, child: const Text('Add')),
-        ]),
-        if (_err.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_err, style: TextStyle(color: p.danger))),
-        const SizedBox(height: 8),
-        ConstrainedBox(
-          constraints: const BoxConstraints(maxHeight: 320),
-          child: _contacts.isEmpty
-              ? Padding(padding: const EdgeInsets.all(16), child: Text('No contacts yet.', style: TextStyle(color: p.subtext)))
-              : ListView(
-                  shrinkWrap: true,
-                  children: _contacts
-                      .map((c) => ListTile(
-                            leading: UserAvatar(userId: c['id'] as String, size: 36),
-                            title: Text(c['id'] as String),
-                            trailing: IconButton(icon: const Icon(Icons.close), onPressed: () => _remove(c['id'] as String)),
-                          ))
-                      .toList(),
-                ),
-        ),
+  Widget _swipeBg(BuildContext context, Alignment align, IconData icon, String label, Gradient g) {
+    return Container(
+      margin: const EdgeInsets.symmetric(vertical: 3),
+      padding: const EdgeInsets.symmetric(horizontal: 28),
+      alignment: align,
+      decoration: BoxDecoration(gradient: g, borderRadius: BorderRadius.circular(22)),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Icon(icon, color: Colors.white),
+        const SizedBox(height: 2),
+        Text(label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700, fontSize: 12)),
       ]),
     );
   }
-}
 
-class _PickSheet extends StatefulWidget {
-  const _PickSheet({required this.mode, required this.contacts, required this.onCreate, required this.onAddContact});
-  final String mode;
-  final List<Map<String, dynamic>> contacts;
-  final Future<void> Function(List<String> members, String name) onCreate;
-  final VoidCallback onAddContact;
-  @override
-  State<_PickSheet> createState() => _PickSheetState();
-}
-
-class _PickSheetState extends State<_PickSheet> {
-  final _name = TextEditingController();
-  final Set<String> _selected = {};
-  bool _busy = false;
-  String _err = '';
-
-  Future<void> _go(List<String> members) async {
-    setState(() {
-      _busy = true;
-      _err = '';
-    });
-    try {
-      await widget.onCreate(members, _name.text.trim());
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _err = e.toString();
-          _busy = false;
-        });
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final p = context.p;
-    final group = widget.mode == 'group';
-    final title = group ? 'New group' : widget.mode == 'secret' ? '🔒 New secret chat' : 'New chat';
-    return Padding(
-      padding: EdgeInsets.fromLTRB(16, 0, 16, MediaQuery.of(context).viewInsets.bottom + 16),
-      child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text(title, style: TextStyle(fontSize: 17, fontWeight: FontWeight.w700, color: p.text)),
-        const SizedBox(height: 12),
-        if (group) ...[
-          TextField(controller: _name, decoration: const InputDecoration(hintText: 'Group name (optional)')),
+  void _menu(BuildContext context) {
+    final muted = chat['muted'] == true;
+    final group = chat['is_group'] == true;
+    showModalBottomSheet(
+      context: context,
+      builder: (c) => SafeArea(
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          SettingsTile(
+            icon: Icons.chat_bubble_rounded,
+            title: 'Open chat',
+            onTap: () {
+              Navigator.pop(c);
+              openChat(context, chat);
+            },
+          ),
+          SettingsTile(
+            icon: muted ? Icons.notifications_active_rounded : Icons.notifications_off_rounded,
+            title: muted ? 'Unmute notifications' : 'Mute notifications',
+            gradient: LinearGradient(colors: [context.p.warn, const Color(0xfffbbf24)]),
+            onTap: () {
+              Navigator.pop(c);
+              onMute();
+            },
+          ),
+          SettingsTile(
+            icon: group ? Icons.logout_rounded : Icons.delete_rounded,
+            title: group ? 'Leave group' : 'Delete chat',
+            destructive: true,
+            onTap: () {
+              Navigator.pop(c);
+              onDelete();
+            },
+          ),
           const SizedBox(height: 8),
-        ],
-        if (widget.contacts.isEmpty)
-          Center(child: FilledButton(onPressed: widget.onAddContact, child: const Text('👤  Add a contact')))
-        else
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 340),
-            child: ListView(
-              shrinkWrap: true,
-              children: widget.contacts.map((c) {
-                final id = c['id'] as String;
-                final sel = _selected.contains(id);
-                return ListTile(
-                  enabled: !_busy,
-                  tileColor: sel ? p.unreadBg : null,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  leading: UserAvatar(userId: id, size: 36),
-                  title: Text(id),
-                  trailing: group ? Icon(sel ? Icons.check_box : Icons.check_box_outline_blank) : null,
-                  onTap: () {
-                    if (!group) {
-                      _go([id]);
-                      return;
-                    }
-                    setState(() => sel ? _selected.remove(id) : _selected.add(id));
-                  },
-                );
-              }).toList(),
-            ),
-          ),
-        if (_err.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 8), child: Text(_err, style: TextStyle(color: p.danger))),
-        if (group) ...[
-          const SizedBox(height: 12),
-          FilledButton(
-            onPressed: _selected.isEmpty || _busy ? null : () => _go(_selected.toList()),
-            child: Text('Create (${_selected.length})'),
-          ),
-        ],
-      ]),
+        ]),
+      ),
     );
   }
 }

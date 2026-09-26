@@ -1,6 +1,8 @@
 import 'dart:async';
+
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
 import '../../api/endpoints.dart';
@@ -10,22 +12,16 @@ import '../../services/auth.dart';
 import '../../services/chat_controller.dart';
 import '../../services/chat_socket.dart';
 import '../../services/notifications.dart';
+import '../../services/stores.dart';
+import '../navigation.dart';
 import '../theme.dart';
 import '../widgets/avatar.dart';
 import '../widgets/common.dart';
 import '../widgets/connection_banner.dart';
+import '../widgets/design.dart';
 import '../widgets/message_list.dart';
-import 'chat_list_screen.dart' show chatTitle;
-
-const _timerOptions = [
-  ('Off', 0),
-  ('5 seconds', 5),
-  ('30 seconds', 30),
-  ('1 minute', 60),
-  ('1 hour', 3600),
-  ('1 day', 86400),
-  ('1 week', 604800),
-];
+import '../widgets/wallpaper.dart';
+import 'chat_info_screen.dart';
 
 class ChatScreen extends StatefulWidget {
   const ChatScreen({super.key, this.chat, this.chatId});
@@ -33,35 +29,38 @@ class ChatScreen extends StatefulWidget {
   final String? chatId;
 
   @override
-  State<ChatScreen> createState() => _ChatScreenState();
+  State<ChatScreen> createState() => ChatScreenState();
 }
 
-class _ChatScreenState extends State<ChatScreen> {
-  Map<String, dynamic>? _chat;
+class ChatScreenState extends State<ChatScreen> {
+  final chatN = ValueNotifier<Map<String, dynamic>?>(null);
   late final String _chatId;
   late final ChatController _ctl;
   StreamSubscription? _sub;
 
   Identity? _identity;
   String _setupError = '';
-  String _fingerprint = '';
+  String fingerprint = '';
   List<String> _missingKeys = [];
   bool _cryptoReady = true;
   bool _cryptoStarted = false;
   bool _busy = false;
+  bool _uploading = false;
   Map<String, dynamic>? _replyTo;
   final _text = TextEditingController();
+  final _focus = FocusNode();
 
   String? get _me => Auth.instance.user;
+  Map<String, dynamic>? get _chat => chatN.value;
 
   @override
   void initState() {
     super.initState();
-    _chat = widget.chat;
+    chatN.value = widget.chat;
     _chatId = (widget.chat?['id'] as String?) ?? widget.chatId!;
     Notifications.instance.activeChatId = _chatId;
-    _ctl = ChatController(_chatId);
-    _ctl.addListener(_onCtl);
+    _ctl = ChatController(_chatId)..addListener(_onCtl);
+    _text.addListener(() => setState(() {}));
 
     if (_chat == null) {
       _refreshChat();
@@ -73,12 +72,12 @@ class _ChatScreenState extends State<ChatScreen> {
       if (msg['chat_id'] != _chatId) return;
       switch (msg['type']) {
         case 'timer':
-          _patch({'self_destruct_seconds': (msg['seconds'] as int?) ?? 0});
+          patch({'self_destruct_seconds': (msg['seconds'] as int?) ?? 0});
         case 'chat_deleted':
         case 'e2e_rejected':
-          if (mounted) Navigator.of(context).maybePop();
+          if (mounted) Navigator.of(context).popUntil((r) => r.isFirst);
         case 'e2e_accepted':
-          _patch({'e2e_status': 'accepted', 'e2e_enabled': true});
+          patch({'e2e_status': 'accepted', 'e2e_enabled': true});
           _maybeSetupCrypto();
       }
     });
@@ -89,19 +88,18 @@ class _ChatScreenState extends State<ChatScreen> {
   }
 
   Future<void> _refreshChat() async {
-    try {
-      final list = await getChats();
-      final found = list.where((c) => c['id'] == _chatId).firstOrNull;
-      if (found != null && mounted) {
-        setState(() => _chat = found);
-        _maybeSetupCrypto();
-      }
-    } catch (_) {}
+    final list = await ChatsStore.instance.load();
+    final found = list.where((c) => c['id'] == _chatId).firstOrNull;
+    if (found != null && mounted) {
+      setState(() => chatN.value = found);
+      _maybeSetupCrypto();
+    }
   }
 
-  void _patch(Map<String, dynamic> patch) {
+  void patch(Map<String, dynamic> values) {
     if (_chat == null || !mounted) return;
-    setState(() => _chat = {..._chat!, ...patch});
+    setState(() => chatN.value = {..._chat!, ...values});
+    ChatsStore.instance.patch(_chatId, values);
   }
 
   bool get _secure => _chat?['e2e_enabled'] == true;
@@ -118,7 +116,7 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       final stored = await Keystore.load(_me);
       if (stored == null) {
-        _setupError = 'Your encryption key is not on this device. Sign out and back in to unlock secure chat.';
+        _setupError = 'Your encryption key is not on this device. Sign out and back in to unlock this chat.';
         return;
       }
       final data = await getChatKeys(_chatId);
@@ -127,10 +125,10 @@ class _ChatScreenState extends State<ChatScreen> {
       _identity = stored;
       _missingKeys = ((data['without_keys'] as List?) ?? []).cast<String>();
       final others = recipients.where((r) => r.userId != _me).toList();
-      if (others.length == 1) _fingerprint = safetyNumber(stored.publicKeyB64, others.first.publicKey);
+      if (others.length == 1) fingerprint = safetyNumber(stored.publicKeyB64, others.first.publicKey);
       _ctl.setCrypto(encrypted: true, key: stored.privateKey, recipients: recipients);
     } catch (e) {
-      _setupError = e.toString();
+      _setupError = errText(e);
     } finally {
       if (mounted) setState(() => _cryptoReady = true);
     }
@@ -143,6 +141,7 @@ class _ChatScreenState extends State<ChatScreen> {
     _ctl.removeListener(_onCtl);
     _ctl.dispose();
     _text.dispose();
+    _focus.dispose();
     super.dispose();
   }
 
@@ -151,30 +150,50 @@ class _ChatScreenState extends State<ChatScreen> {
   Future<void> _send() async {
     final text = _text.text;
     if (text.trim().isEmpty) return;
+    HapticFeedback.lightImpact();
     final ok = await _ctl.send(text, _replyTo?['id'] as int?);
     if (ok) {
       _text.clear();
       setState(() => _replyTo = null);
-    } else if (_ctl.error.isEmpty) {
-      _ctl.setError('Not connected — message not sent.');
+    } else if (mounted) {
+      toast(context, _ctl.error.isNotEmpty ? errText(_ctl.error) : 'Not connected — message not sent', error: true);
     }
   }
 
-  Future<void> _attach() async {
-    final choice = await showModalBottomSheet<String>(
-      context: context,
-      builder: (c) => SafeArea(
-        child: Column(mainAxisSize: MainAxisSize.min, children: [
-          ListTile(leading: const Icon(Icons.photo), title: const Text('Photo'), onTap: () => Navigator.pop(c, 'photo')),
-          ListTile(leading: const Icon(Icons.photo_camera), title: const Text('Camera'), onTap: () => Navigator.pop(c, 'camera')),
-          ListTile(leading: const Icon(Icons.attach_file), title: const Text('File'), onTap: () => Navigator.pop(c, 'file')),
-        ]),
-      ),
-    );
+  Future<void> _attach([String? preset]) async {
+    final p = context.p;
+    final choice = preset ??
+        await showModalBottomSheet<String>(
+          context: context,
+          builder: (c) => SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+              child: Row(children: [
+                for (final (key, icon, label, g) in [
+                  ('photo', Icons.photo_library_rounded, 'Gallery', p.gradient),
+                  ('camera', Icons.photo_camera_rounded, 'Camera',
+                      const LinearGradient(colors: [Color(0xff2563eb), Color(0xff06b6d4)])),
+                  ('file', Icons.insert_drive_file_rounded, 'File',
+                      const LinearGradient(colors: [Color(0xfff97316), Color(0xffe11d48)])),
+                ])
+                  Expanded(
+                    child: Pressable(
+                      onTap: () => Navigator.pop(c, key),
+                      child: Column(children: [
+                        GradientIcon(icon, size: 64, gradient: g, radius: 22),
+                        const SizedBox(height: 8),
+                        Text(label, style: TextStyle(color: p.text, fontWeight: FontWeight.w600)),
+                      ]),
+                    ),
+                  ),
+              ]),
+            ),
+          ),
+        );
     if (choice == null) return;
-    String? path;
-    String? name;
     try {
+      String? path;
+      String? name;
       if (choice == 'file') {
         final r = await FilePicker.platform.pickFiles();
         path = r?.files.single.path;
@@ -186,12 +205,13 @@ class _ChatScreenState extends State<ChatScreen> {
         name = x?.name;
       }
       if (path == null) return;
-      setState(() => _busy = true);
+      setState(() => _uploading = true);
       await uploadMedia(_chatId, path, filename: name);
+      HapticFeedback.lightImpact();
     } catch (e) {
-      _ctl.setError('Upload failed: $e');
+      if (mounted) toast(context, 'Upload failed: ${errText(e)}', error: true);
     } finally {
-      if (mounted) setState(() => _busy = false);
+      if (mounted) setState(() => _uploading = false);
     }
   }
 
@@ -199,148 +219,15 @@ class _ChatScreenState extends State<ChatScreen> {
     try {
       await deleteMessage(m['id'] as int, scope: scope);
     } catch (e) {
-      _ctl.setError(e.toString());
+      if (mounted) toast(context, errText(e), error: true);
     }
   }
 
-  Future<void> _chooseTimer() async {
-    final current = (_chat?['self_destruct_seconds'] as int?) ?? 0;
-    final seconds = await showDialog<int>(
-      context: context,
-      builder: (c) => SimpleDialog(
-        title: const Text('Self-destruct timer'),
-        children: [
-          const Padding(
-            padding: EdgeInsets.symmetric(horizontal: 24, vertical: 4),
-            child: Text('New messages are deleted this long after they are sent, on every device.'),
-          ),
-          for (final (label, s) in _timerOptions)
-            SimpleDialogOption(
-              onPressed: () => Navigator.pop(c, s),
-              child: Text('${s == current ? '✓ ' : ''}$label'),
-            ),
-        ],
-      ),
-    );
-    if (seconds == null || seconds == current) return;
-    _patch({'self_destruct_seconds': seconds});
-    try {
-      await setSelfDestruct(_chatId, seconds);
-    } catch (e) {
-      _patch({'self_destruct_seconds': current});
-      _ctl.setError(e.toString());
-    }
-  }
-
-  Future<void> _toggleMute() async {
-    final next = _chat?['muted'] != true;
-    _patch({'muted': next});
-    next ? Notifications.instance.mutedChats.add(_chatId) : Notifications.instance.mutedChats.remove(_chatId);
-    try {
-      await setChatMute(_chatId, next);
-    } catch (_) {
-      _patch({'muted': !next});
-    }
-  }
-
-  Future<void> _startSecret() async {
-    final other = ((_chat?['members'] as List?) ?? []).cast<String>().where((m) => m != _me).firstOrNull;
-    if (other == null) return;
-    final ok = await confirm(context, 'Start a secret chat?',
-        'It opens as a separate, end-to-end encrypted conversation once they accept. This chat is unchanged.',
-        ok: 'Start');
-    if (!ok) return;
-    try {
-      final res = await createSecretChat(other);
-      if (!mounted) return;
-      Navigator.pushReplacement(
-          context, MaterialPageRoute(builder: (_) => ChatScreen(chatId: res['chat_id'] as String)));
-    } catch (e) {
-      _ctl.setError(e.toString());
-    }
-  }
-
-  Future<void> _deleteChat() async {
-    final group = _chat?['is_group'] == true;
-    final ok = await confirm(
+  void _openInfo() {
+    Navigator.push(
       context,
-      group ? 'Leave group?' : 'Delete chat?',
-      _isSecret
-          ? 'This deletes the secret chat for both of you. Cannot be undone.'
-          : group
-              ? 'You will stop receiving its messages.'
-              : 'Removes it from your list. The other person keeps their copy.',
-      ok: group ? 'Leave' : 'Delete',
-      destructive: true,
+      MaterialPageRoute(builder: (_) => ChatInfoScreen(host: this)),
     );
-    if (!ok) return;
-    try {
-      await deleteChat(_chatId, scope: _isSecret ? 'everyone' : 'me');
-      if (mounted) Navigator.pop(context);
-    } catch (e) {
-      _ctl.setError(e.toString());
-    }
-  }
-
-  void _showVerify() {
-    showDialog(
-      context: context,
-      builder: (c) => AlertDialog(
-        title: const Text('Verify safety number'),
-        content: Column(mainAxisSize: MainAxisSize.min, children: [
-          const Text('Compare this number with the other person, in person or over a trusted channel. '
-              'If it matches, nobody is intercepting your messages.'),
-          const SizedBox(height: 16),
-          SelectableText(_fingerprint,
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontFamily: 'monospace', fontSize: 18, letterSpacing: 1.5)),
-        ]),
-        actions: [TextButton(onPressed: () => Navigator.pop(c), child: const Text('Close'))],
-      ),
-    );
-  }
-
-  Future<void> _showMembers() async {
-    try {
-      final data = await getChatMembers(_chatId);
-      final list = data is Map ? (data['members'] as List? ?? []) : (data as List? ?? []);
-      if (!mounted) return;
-      showDialog(
-        context: context,
-        builder: (c) => AlertDialog(
-          title: const Text('Members'),
-          content: SizedBox(
-            width: double.maxFinite,
-            child: ListView(
-              shrinkWrap: true,
-              children: list.map((m) {
-                final id = m is Map ? '${m['id'] ?? m['user_id'] ?? m['username']}' : '$m';
-                return ListTile(leading: UserAvatar(userId: id, size: 32), title: Text(id));
-              }).toList(),
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () async {
-                final name = await promptText(c, 'Add member', hint: 'Username');
-                if (name == null || name.trim().isEmpty) return;
-                try {
-                  await addMember(_chatId, name.trim());
-                  if (c.mounted) Navigator.pop(c);
-                  _refreshChat();
-                } catch (e) {
-                  if (c.mounted) toast(c, e.toString());
-                }
-              },
-              child: const Text('Add member'),
-            ),
-            TextButton(onPressed: () => Navigator.pop(c), child: const Text('Close')),
-          ],
-        ),
-      );
-    } catch (e) {
-      _ctl.setError(e.toString());
-    }
   }
 
   /* ------------------------------------------------------------- build */
@@ -350,71 +237,101 @@ class _ChatScreenState extends State<ChatScreen> {
     final p = context.p;
     final chat = _chat;
     if (chat == null) {
-      return Scaffold(appBar: AppBar(), body: Center(child: Text('Loading conversation…', style: TextStyle(color: p.subtext))));
+      return Scaffold(appBar: AppBar(), body: const Center(child: CircularProgressIndicator()));
     }
     final title = chatTitle(chat, _me);
     final isGroup = chat['is_group'] == true;
     final timer = (chat['self_destruct_seconds'] as int?) ?? 0;
-    final timerLabel = _timerOptions.where((o) => o.$2 == timer).map((o) => o.$1).firstOrNull ?? '${timer}s';
+    final members = ((chat['members'] as List?) ?? []).length;
 
     final subtitle = _pending
-        ? 'Secret chat · pending'
-        : _isSecret
-            ? 'Secret chat${timer > 0 ? ' · 🔥 $timerLabel' : ''}'
-            : _secure
-                ? 'End-to-end encrypted'
-                : isGroup
-                    ? '${((chat['members'] as List?) ?? []).length} members'
-                    : '';
+        ? 'Waiting to be accepted'
+        : _isSecret || _secure
+            ? 'End-to-end encrypted${timer > 0 ? ' · ${timerLabel(timer)}' : ''}'
+            : isGroup
+                ? '$members members'
+                : 'Tap for info';
 
     return Scaffold(
-      appBar: AppBar(
-        titleSpacing: 0,
-        shape: _secure || _isSecret ? Border(bottom: BorderSide(color: p.secure, width: 1.5)) : null,
-        title: Row(children: [
-          if (!isGroup) ...[UserAvatar(userId: title, size: 34), const SizedBox(width: 10)],
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('${_secure || _isSecret ? '🔒 ' : ''}$title', maxLines: 1, overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
-              if (subtitle.isNotEmpty)
-                Text(subtitle, style: TextStyle(fontSize: 12, color: _isSecret || _secure ? p.secure : p.subtext)),
-            ]),
+      extendBodyBehindAppBar: true,
+      resizeToAvoidBottomInset: true,
+      appBar: PreferredSize(
+        preferredSize: const Size.fromHeight(kToolbarHeight + 4),
+        child: Glass(
+          radius: 0,
+          opacity: p.dark ? 0.6 : 0.75,
+          child: SafeArea(
+            bottom: false,
+            child: SizedBox(
+              height: kToolbarHeight + 4,
+              child: Row(children: [
+                const BackButton(),
+                Expanded(
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(16),
+                    onTap: _openInfo,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 6),
+                      child: Row(children: [
+                        Hero(
+                          tag: 'avatar-$_chatId',
+                          child: UserAvatar(userId: title, size: 42, group: isGroup, secret: _isSecret),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+                            Text(title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(color: p.text, fontSize: 17, fontWeight: FontWeight.w700)),
+                            Row(children: [
+                              if (_isSecret || _secure) ...[
+                                Icon(Icons.lock_rounded, size: 12, color: p.secure),
+                                const SizedBox(width: 3),
+                              ],
+                              Flexible(
+                                child: Text(subtitle,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: TextStyle(
+                                        fontSize: 12.5,
+                                        color: _isSecret || _secure ? p.secure : p.subtext,
+                                        fontWeight: FontWeight.w500)),
+                              ),
+                            ]),
+                          ]),
+                        ),
+                      ]),
+                    ),
+                  ),
+                ),
+                if (timer > 0)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 4),
+                    child: Icon(Icons.local_fire_department_rounded, color: p.warn),
+                  ),
+                IconButton(icon: const Icon(Icons.more_vert_rounded), onPressed: _openInfo),
+              ]),
+            ),
           ),
-        ]),
-        actions: [
-          PopupMenuButton<String>(
-            onSelected: (v) {
-              switch (v) {
-                case 'mute': _toggleMute();
-                case 'timer': _chooseTimer();
-                case 'secret': _startSecret();
-                case 'verify': _showVerify();
-                case 'members': _showMembers();
-                case 'delete': _deleteChat();
-              }
-            },
-            itemBuilder: (_) => [
-              PopupMenuItem(value: 'mute', child: Text(chat['muted'] == true ? '🔔  Unmute' : '🔕  Mute')),
-              if (_isSecret && !_pending) const PopupMenuItem(value: 'timer', child: Text('🔥  Self-destruct timer')),
-              if (!isGroup && !_isSecret) const PopupMenuItem(value: 'secret', child: Text('🔒  Start secret chat')),
-              if (_fingerprint.isNotEmpty) const PopupMenuItem(value: 'verify', child: Text('🛡️  Verify safety number')),
-              if (isGroup) const PopupMenuItem(value: 'members', child: Text('👥  Members')),
-              PopupMenuItem(
-                value: 'delete',
-                child: Text(isGroup ? '🚪  Leave group' : '🗑️  Delete chat', style: TextStyle(color: p.danger)),
-              ),
-            ],
+        ),
+      ),
+      body: Stack(children: [
+        Positioned.fill(
+          child: ListenableBuilder(
+            listenable: AppSettings.instance,
+            builder: (_, __) =>
+                AppSettings.instance.wallpaper ? ChatWallpaper(secure: _isSecret) : ColoredBox(color: p.bg),
           ),
-        ],
-      ),
-      body: SafeArea(
-        top: false,
-        child: Column(children: [
-          ConnectionBanner(status: _ctl.status),
-          Expanded(child: _pending ? _pendingView(chat, title) : _activeView()),
-        ]),
-      ),
+        ),
+        SafeArea(
+          child: Column(children: [
+            const SizedBox(height: kToolbarHeight + 4),
+            ConnectionBanner(status: _ctl.status),
+            Expanded(child: _pending ? _pendingView(chat, title) : _activeView(isGroup)),
+          ]),
+        ),
+      ]),
     );
   }
 
@@ -422,71 +339,95 @@ class _ChatScreenState extends State<ChatScreen> {
     final p = context.p;
     final requestedByMe = chat['e2e_requested_by'] == _me;
     return Center(
-      child: Padding(
+      child: SingleChildScrollView(
         padding: const EdgeInsets.all(24),
-        child: requestedByMe
-            ? Text('Waiting for $title to accept this secret chat. You can send messages once they do.',
-                textAlign: TextAlign.center, style: TextStyle(color: p.subtext))
-            : Column(mainAxisSize: MainAxisSize.min, children: [
-                Text('${chat['e2e_requested_by']} wants to start an end-to-end encrypted secret chat with you.',
-                    textAlign: TextAlign.center, style: TextStyle(color: p.text)),
-                if (_ctl.error.isNotEmpty)
-                  Padding(padding: const EdgeInsets.only(top: 8), child: Text(_ctl.error, style: TextStyle(color: p.danger))),
-                const SizedBox(height: 16),
-                Row(mainAxisAlignment: MainAxisAlignment.center, children: [
-                  FilledButton(
-                    style: FilledButton.styleFrom(backgroundColor: p.secure),
-                    onPressed: _busy
-                        ? null
-                        : () async {
-                            setState(() => _busy = true);
-                            try {
-                              await acceptE2E(_chatId);
-                              _patch({'e2e_status': 'accepted', 'e2e_enabled': true});
-                              _maybeSetupCrypto();
-                            } catch (e) {
-                              _ctl.setError(e.toString());
-                            } finally {
-                              if (mounted) setState(() => _busy = false);
+        child: FadeSlideIn(
+          child: Glass(
+            radius: 30,
+            padding: const EdgeInsets.all(24),
+            child: Column(mainAxisSize: MainAxisSize.min, children: [
+              GradientIcon(requestedByMe ? Icons.hourglass_top_rounded : Icons.lock_person_rounded,
+                  size: 84, radius: 30, gradient: p.secureGradient),
+              const SizedBox(height: 20),
+              Text(requestedByMe ? 'Invitation sent' : 'Secret chat invitation',
+                  style: TextStyle(color: p.text, fontSize: 22, fontWeight: FontWeight.w800)),
+              const SizedBox(height: 8),
+              Text(
+                requestedByMe
+                    ? 'You can message $title as soon as they accept. Everything here will be end-to-end encrypted.'
+                    : '${chat['e2e_requested_by']} wants to start an end-to-end encrypted chat. Only the two of you will be able to read it.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: p.subtext, height: 1.5),
+              ),
+              const SizedBox(height: 20),
+              for (final (icon, text) in [
+                (Icons.enhanced_encryption_rounded, 'Encrypted on your device'),
+                (Icons.local_fire_department_rounded, 'Optional self-destruct timer'),
+                (Icons.verified_user_rounded, 'Verify with a safety number'),
+              ])
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(children: [
+                    Icon(icon, size: 18, color: p.secure),
+                    const SizedBox(width: 10),
+                    Text(text, style: TextStyle(color: p.text)),
+                  ]),
+                ),
+              if (!requestedByMe) ...[
+                const SizedBox(height: 24),
+                GradientButton(
+                  label: 'Accept',
+                  icon: Icons.check_rounded,
+                  gradient: p.secureGradient,
+                  busy: _busy,
+                  onPressed: () async {
+                    setState(() => _busy = true);
+                    try {
+                      await acceptE2E(_chatId);
+                      HapticFeedback.mediumImpact();
+                      patch({'e2e_status': 'accepted', 'e2e_enabled': true});
+                      _maybeSetupCrypto();
+                    } catch (e) {
+                      if (mounted) toast(context, errText(e), error: true);
+                    } finally {
+                      if (mounted) setState(() => _busy = false);
+                    }
+                  },
+                ),
+                const SizedBox(height: 8),
+                TextButton(
+                  onPressed: _busy
+                      ? null
+                      : () async {
+                          setState(() => _busy = true);
+                          try {
+                            await rejectE2E(_chatId);
+                            if (mounted) Navigator.pop(context);
+                          } catch (e) {
+                            if (mounted) {
+                              toast(context, errText(e), error: true);
+                              setState(() => _busy = false);
                             }
-                          },
-                    child: const Text('Accept'),
-                  ),
-                  const SizedBox(width: 12),
-                  OutlinedButton(
-                    onPressed: _busy
-                        ? null
-                        : () async {
-                            setState(() => _busy = true);
-                            try {
-                              await rejectE2E(_chatId);
-                              if (mounted) Navigator.pop(context);
-                            } catch (e) {
-                              _ctl.setError(e.toString());
-                              if (mounted) setState(() => _busy = false);
-                            }
-                          },
-                    child: const Text('Reject'),
-                  ),
-                ]),
-              ]),
+                          }
+                        },
+                  child: Text('Decline', style: TextStyle(color: p.danger, fontWeight: FontWeight.w600)),
+                ),
+              ],
+            ]),
+          ),
+        ),
       ),
     );
   }
 
-  Widget _activeView() {
+  Widget _activeView(bool isGroup) {
     final p = context.p;
     final blocked = _secure && (_setupError.isNotEmpty || _identity == null);
     return Column(children: [
+      if (_setupError.isNotEmpty) _banner(Icons.lock_outline_rounded, _setupError, p.warn),
       if (_secure && _missingKeys.isNotEmpty)
-        _note('⚠️ ${_missingKeys.join(', ')} ${_missingKeys.length == 1 ? 'has' : 'have'} no encryption key yet and cannot read messages.',
-            p.warnBg, p.warnText),
-      if (_setupError.isNotEmpty) _note(_setupError, p.warnBg, p.warnText),
-      if (_ctl.error.isNotEmpty)
-        GestureDetector(
-          onTap: () => _ctl.setError(''),
-          child: _note('${_ctl.error}  ✕', p.danger.withValues(alpha: 0.12), p.danger),
-        ),
+        _banner(Icons.key_off_rounded,
+            '${_missingKeys.join(', ')} ${_missingKeys.length == 1 ? 'has' : 'have'} no encryption key yet', p.warn),
       Expanded(
         child: _ctl.loading || !_cryptoReady
             ? const Center(child: CircularProgressIndicator())
@@ -494,64 +435,233 @@ class _ChatScreenState extends State<ChatScreen> {
                 messages: _ctl.messages,
                 me: _me,
                 secure: _secure,
-                onReply: (m) => setState(() => _replyTo = m),
+                group: isGroup,
+                header: _secure ? _secureHeader() : null,
+                onReply: (m) {
+                  HapticFeedback.selectionClick();
+                  setState(() => _replyTo = m);
+                  _focus.requestFocus();
+                },
                 onDelete: _deleteMessage,
               ),
       ),
-      if (_replyTo != null)
-        Container(
-          color: p.card,
-          padding: const EdgeInsets.fromLTRB(12, 8, 4, 0),
-          child: Row(children: [
-            Container(width: 3, height: 32, color: p.primary),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                Text('Replying to ${_replyTo!['from']}', style: TextStyle(color: p.primary, fontSize: 12)),
-                Text(messagePreview(_replyTo!), maxLines: 1, overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: p.subtext, fontSize: 13)),
-              ]),
-            ),
-            IconButton(icon: const Icon(Icons.close, size: 18), onPressed: () => setState(() => _replyTo = null)),
-          ]),
-        ),
-      Container(
-        color: p.card,
-        padding: const EdgeInsets.fromLTRB(4, 6, 4, 6),
-        child: Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
-          if (!_secure)
-            IconButton(
-              icon: _busy ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.attach_file),
-              onPressed: _busy || blocked ? null : _attach,
-            ),
-          Expanded(
-            child: TextField(
-              controller: _text,
-              enabled: !blocked,
-              minLines: 1,
-              maxLines: 5,
-              textCapitalization: TextCapitalization.sentences,
-              decoration: InputDecoration(
-                hintText: blocked ? 'Secure chat is locked' : (_secure ? '🔒 Encrypted message' : 'Message'),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide(color: p.border)),
-                fillColor: p.bg,
-                isDense: true,
-              ),
-            ),
-          ),
-          IconButton(
-            icon: Icon(Icons.send, color: _secure ? p.secure : p.primary),
-            onPressed: blocked ? null : _send,
-          ),
-        ]),
-      ),
+      _composer(blocked),
     ]);
   }
 
-  Widget _note(String text, Color bg, Color fg) => Container(
-        width: double.infinity,
-        color: bg,
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-        child: Text(text, style: TextStyle(color: fg, fontSize: 13)),
+  Widget _secureHeader() {
+    final p = context.p;
+    return Center(
+      child: GestureDetector(
+        onTap: fingerprint.isNotEmpty ? () => showSafetyNumber(context, fingerprint) : null,
+        child: Container(
+          margin: const EdgeInsets.fromLTRB(32, 12, 32, 12),
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: p.secure.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: p.secure.withValues(alpha: 0.3)),
+          ),
+          child: Column(children: [
+            Icon(Icons.lock_rounded, color: p.secure),
+            const SizedBox(height: 6),
+            Text('Messages in this chat are end-to-end encrypted. Nobody else — not even the server — can read them.',
+                textAlign: TextAlign.center, style: TextStyle(color: p.secure, fontSize: 12.5, height: 1.4)),
+            if (fingerprint.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(top: 6),
+                child: Text('Tap to verify safety number',
+                    style: TextStyle(color: p.secure, fontSize: 12.5, fontWeight: FontWeight.w700)),
+              ),
+          ]),
+        ),
+      ),
+    );
+  }
+
+  Widget _banner(IconData icon, String text, Color color) => Container(
+        margin: const EdgeInsets.fromLTRB(12, 6, 12, 0),
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        decoration: BoxDecoration(color: color.withValues(alpha: 0.15), borderRadius: BorderRadius.circular(16)),
+        child: Row(children: [
+          Icon(icon, color: color, size: 18),
+          const SizedBox(width: 10),
+          Expanded(child: Text(text, style: TextStyle(color: color, fontSize: 13, fontWeight: FontWeight.w500))),
+        ]),
       );
+
+  Widget _composer(bool blocked) {
+    final p = context.p;
+    final hasText = _text.text.trim().isNotEmpty;
+    final g = _secure ? p.secureGradient : p.gradient;
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+      child: Glass(
+        radius: 28,
+        padding: const EdgeInsets.all(6),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          AnimatedSize(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
+            child: _replyTo == null
+                ? const SizedBox(width: double.infinity)
+                : Container(
+                    margin: const EdgeInsets.fromLTRB(4, 2, 4, 6),
+                    padding: const EdgeInsets.fromLTRB(12, 8, 4, 8),
+                    decoration: BoxDecoration(
+                      color: p.primary.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(18),
+                    ),
+                    child: Row(children: [
+                      Icon(Icons.reply_rounded, color: p.primary, size: 20),
+                      const SizedBox(width: 8),
+                      Expanded(
+                        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                          Text('Reply to ${_replyTo!['from']}',
+                              style: TextStyle(color: p.primary, fontSize: 12.5, fontWeight: FontWeight.w700)),
+                          Text(messagePreview(_replyTo!),
+                              maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: p.subtext, fontSize: 13)),
+                        ]),
+                      ),
+                      IconButton(
+                        visualDensity: VisualDensity.compact,
+                        icon: const Icon(Icons.close_rounded, size: 18),
+                        onPressed: () => setState(() => _replyTo = null),
+                      ),
+                    ]),
+                  ),
+          ),
+          if (_uploading)
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 2, 8, 6),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(minHeight: 4, color: p.primary, backgroundColor: p.surfaceHigh),
+              ),
+            ),
+          Row(crossAxisAlignment: CrossAxisAlignment.end, children: [
+            if (!_secure)
+              IconButton(
+                icon: Icon(Icons.add_circle_outline_rounded, color: p.subtext, size: 26),
+                onPressed: blocked || _uploading ? null : _attach,
+              )
+            else
+              const SizedBox(width: 8),
+            Expanded(
+              child: TextField(
+                controller: _text,
+                focusNode: _focus,
+                enabled: !blocked,
+                minLines: 1,
+                maxLines: 6,
+                textCapitalization: TextCapitalization.sentences,
+                style: TextStyle(color: p.text, fontSize: 15.5),
+                decoration: InputDecoration(
+                  hintText: blocked ? 'Chat is locked' : (_secure ? 'Encrypted message' : 'Message'),
+                  filled: false,
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 6, vertical: 12),
+                  border: InputBorder.none,
+                  enabledBorder: InputBorder.none,
+                  focusedBorder: InputBorder.none,
+                  disabledBorder: InputBorder.none,
+                ),
+              ),
+            ),
+            AnimatedSwitcher(
+              duration: const Duration(milliseconds: 220),
+              transitionBuilder: (c, a) => ScaleTransition(scale: a, child: c),
+              child: hasText
+                  ? Pressable(
+                      key: const ValueKey('send'),
+                      onTap: blocked ? null : _send,
+                      child: Container(
+                        width: 44,
+                        height: 44,
+                        decoration: BoxDecoration(
+                          gradient: g,
+                          shape: BoxShape.circle,
+                          boxShadow: [BoxShadow(color: p.primary.withValues(alpha: 0.4), blurRadius: 12, offset: const Offset(0, 4))],
+                        ),
+                        child: const Icon(Icons.arrow_upward_rounded, color: Colors.white),
+                      ),
+                    )
+                  : _secure
+                      ? const SizedBox(key: ValueKey('none'), width: 44, height: 44)
+                      : IconButton(
+                          key: const ValueKey('camera'),
+                          icon: Icon(Icons.photo_camera_rounded, color: p.subtext),
+                          onPressed: blocked || _uploading ? null : () => _attach('camera'),
+                        ),
+            ),
+          ]),
+        ]),
+      ),
+    );
+  }
+}
+
+String timerLabel(int s) => switch (s) {
+      0 => 'Off',
+      5 => '5 seconds',
+      30 => '30 seconds',
+      60 => '1 minute',
+      3600 => '1 hour',
+      86400 => '1 day',
+      604800 => '1 week',
+      _ => '${s}s',
+    };
+
+void showSafetyNumber(BuildContext context, String fingerprint) {
+  final p = context.p;
+  final groups = fingerprint.split(' ');
+  showModalBottomSheet(
+    context: context,
+    builder: (c) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
+        child: Column(mainAxisSize: MainAxisSize.min, children: [
+          GradientIcon(Icons.verified_user_rounded, size: 64, gradient: p.secureGradient),
+          const SizedBox(height: 16),
+          Text('Safety number', style: TextStyle(color: p.text, fontSize: 22, fontWeight: FontWeight.w800)),
+          const SizedBox(height: 6),
+          Text('Compare these numbers with the other person in person or on a call. If they match, your chat is private.',
+              textAlign: TextAlign.center, style: TextStyle(color: p.subtext, height: 1.5)),
+          const SizedBox(height: 20),
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: p.secure.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: Wrap(
+              alignment: WrapAlignment.center,
+              spacing: 18,
+              runSpacing: 10,
+              children: [
+                for (final g in groups)
+                  Text(g,
+                      style: TextStyle(
+                          color: p.text,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 2,
+                          fontFeatures: const [FontFeature.tabularFigures()])),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          TextButton.icon(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: fingerprint));
+              Navigator.pop(c);
+              toast(context, 'Safety number copied');
+            },
+            icon: const Icon(Icons.copy_rounded),
+            label: const Text('Copy'),
+          ),
+        ]),
+      ),
+    ),
+  );
 }

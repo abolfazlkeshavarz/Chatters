@@ -85,34 +85,11 @@ Future<void> setAvatarVisibility(String v) =>
 String avatarUrl(String userId, [Object? bust]) =>
     '${Api.url('/api/avatars/${_e(userId)}')}${bust != null ? '?v=$bust' : ''}';
 
-/* ------------------------------------------------------------------ admin */
+/* ---------------------------------------------------------- announcements */
 
-Future<Map<String, dynamic>> adminStats() async =>
-    (await Api.get('/api/admin/stats')) as Map<String, dynamic>;
-
-Future<Map<String, dynamic>> adminListUsers({String search = '', int limit = 25, int offset = 0}) async {
-  final q = Uri(queryParameters: {'search': search, 'limit': '$limit', 'offset': '$offset'}).query;
-  return (await Api.get('/api/admin/users?$q')) as Map<String, dynamic>;
+Future<List<Map<String, dynamic>>> getAnnouncements() async {
+  final d = await Api.get('/api/announcements');
+  return ((d is Map ? d['announcements'] : null) as List? ?? []).cast<Map<String, dynamic>>();
 }
 
-Future<void> adminCreateUser(String username, String email, String password, bool isAdmin) =>
-    Api.post('/api/admin/users',
-        {'username': username, 'email': email, 'password': password, 'is_admin': isAdmin});
-
-Future<void> adminDeleteUser(String id) => Api.del('/api/admin/users/${_e(id)}');
-
-Future<void> adminResetPassword(String id, String pw) =>
-    Api.put('/api/admin/users/${_e(id)}/password', {'new_password': pw});
-
-Future<void> adminSetRole(String id, bool isAdmin) =>
-    Api.put('/api/admin/users/${_e(id)}/role', {'is_admin': isAdmin});
-
-Future<int> adminGetE2ERetention() async {
-  final d = await Api.get('/api/admin/settings/e2e-retention');
-  return (d is Map ? d['retention_seconds'] as int? : null) ?? 0;
-}
-
-Future<void> adminSetE2ERetention(int s) =>
-    Api.put('/api/admin/settings/e2e-retention', {'retention_seconds': s});
-
-Future<dynamic> adminPurgeE2E() => Api.post('/api/admin/e2e/purge-now');
+Future<void> ackAnnouncement(int id) => Api.post('/api/announcements/${_e(id)}/ack');

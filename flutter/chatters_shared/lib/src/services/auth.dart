@@ -8,6 +8,7 @@ import '../crypto/e2ee.dart';
 import '../crypto/keystore.dart';
 import '../storage.dart';
 import 'chat_socket.dart';
+import 'stores.dart';
 
 /// Signed-in state for the whole app.
 class Auth extends ChangeNotifier {
@@ -77,6 +78,8 @@ class Auth extends ChangeNotifier {
 
   void _afterSignIn() {
     ChatSocket.instance.start();
+    ChatsStore.instance.start();
+    ContactsStore.instance.load();
     refreshRole();
   }
 
@@ -97,6 +100,8 @@ class Auth extends ChangeNotifier {
 
   void _signedOut() {
     ChatSocket.instance.stop();
+    ChatsStore.instance.stop();
+    ContactsStore.instance.contacts = [];
     isAdmin = false;
     notifyListeners();
   }

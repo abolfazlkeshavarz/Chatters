@@ -1,73 +1,116 @@
+import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
-/// The web app's colour tokens, light + dark.
+import '../storage.dart';
+
+/* ------------------------------------------------------------- accents */
+
+class Accent {
+  const Accent(this.name, this.a, this.b);
+  final String name;
+  final Color a, b;
+  LinearGradient get gradient =>
+      LinearGradient(colors: [a, b], begin: Alignment.topLeft, end: Alignment.bottomRight);
+}
+
+const accents = [
+  Accent('Aurora', Color(0xff7c3aed), Color(0xffec4899)),
+  Accent('Ocean', Color(0xff2563eb), Color(0xff06b6d4)),
+  Accent('Sunset', Color(0xfff97316), Color(0xffe11d48)),
+  Accent('Mint', Color(0xff059669), Color(0xff3b82f6)),
+  Accent('Grape', Color(0xff4f46e5), Color(0xffa855f7)),
+];
+
+/* ------------------------------------------------------------ settings */
+
+/// Look-and-feel preferences, kept on the device.
+class AppSettings extends ChangeNotifier {
+  AppSettings._();
+  static final AppSettings instance = AppSettings._();
+
+  ThemeMode mode = ThemeMode.system;
+  int accentIndex = 0;
+  bool wallpaper = true;
+
+  Accent get accent => accents[accentIndex.clamp(0, accents.length - 1)];
+
+  Future<void> load() async {
+    final m = await Storage.readRaw('ui.mode');
+    mode = ThemeMode.values.firstWhere((x) => x.name == m, orElse: () => ThemeMode.system);
+    accentIndex = int.tryParse(await Storage.readRaw('ui.accent') ?? '') ?? 0;
+    wallpaper = (await Storage.readRaw('ui.wallpaper')) != '0';
+  }
+
+  void setMode(ThemeMode m) {
+    mode = m;
+    Storage.writeRaw('ui.mode', m.name);
+    notifyListeners();
+  }
+
+  void setAccent(int i) {
+    accentIndex = i;
+    Storage.writeRaw('ui.accent', '$i');
+    HapticFeedback.selectionClick();
+    notifyListeners();
+  }
+
+  void setWallpaper(bool v) {
+    wallpaper = v;
+    Storage.writeRaw('ui.wallpaper', v ? '1' : '0');
+    notifyListeners();
+  }
+}
+
+/* ------------------------------------------------------------- palette */
+
 class Palette extends ThemeExtension<Palette> {
   const Palette({
+    required this.dark,
+    required this.accent,
     required this.bg,
-    required this.card,
+    required this.surface,
+    required this.surfaceHigh,
     required this.border,
     required this.text,
     required this.subtext,
-    required this.primary,
     required this.danger,
     required this.success,
-    required this.unreadBg,
+    required this.secure,
+    required this.warn,
     required this.bubbleIn,
     required this.bubbleInText,
-    required this.secure,
-    required this.secureBg,
-    required this.bubbleSent,
-    required this.bubbleSentText,
-    required this.bubbleSentBorder,
-    required this.warnBg,
-    required this.warnText,
   });
 
-  final Color bg, card, border, text, subtext, primary, danger, success, unreadBg;
-  final Color bubbleIn, bubbleInText, secure, secureBg, bubbleSent, bubbleSentText;
-  final Color bubbleSentBorder, warnBg, warnText;
+  final bool dark;
+  final Accent accent;
+  final Color bg, surface, surfaceHigh, border, text, subtext;
+  final Color danger, success, secure, warn, bubbleIn, bubbleInText;
 
-  static const light = Palette(
-    bg: Color(0xfff4f5f9),
-    card: Color(0xffffffff),
-    border: Color(0xffe3e5ec),
-    text: Color(0xff17181d),
-    subtext: Color(0xff6b6f7d),
-    primary: Color(0xff5457e5),
-    danger: Color(0xffef4444),
-    success: Color(0xff22b573),
-    unreadBg: Color(0xffeeeefd),
-    bubbleIn: Color(0xffeceef3),
-    bubbleInText: Color(0xff17181d),
-    secure: Color(0xff16a367),
-    secureBg: Color(0xffe6f7ee),
-    bubbleSent: Color(0xffffffff),
-    bubbleSentText: Color(0xff17181d),
-    bubbleSentBorder: Color(0xffd8dae2),
-    warnBg: Color(0xfffff4d6),
-    warnText: Color(0xff5c4400),
-  );
+  Color get primary => accent.a;
+  LinearGradient get gradient => accent.gradient;
+  LinearGradient get secureGradient => const LinearGradient(
+      colors: [Color(0xff059669), Color(0xff10b981)], begin: Alignment.topLeft, end: Alignment.bottomRight);
 
-  static const dark = Palette(
-    bg: Color(0xff0b0c10),
-    card: Color(0xff17181e),
-    border: Color(0xff2a2c36),
-    text: Color(0xfff2f2f7),
-    subtext: Color(0xff9498a8),
-    primary: Color(0xff7376f0),
-    danger: Color(0xffef4444),
-    success: Color(0xff22b573),
-    unreadBg: Color(0xff1e2040),
-    bubbleIn: Color(0xff24262f),
-    bubbleInText: Color(0xfff2f2f7),
-    secure: Color(0xff16a367),
-    secureBg: Color(0xff10281c),
-    bubbleSent: Color(0xffe9e9ed),
-    bubbleSentText: Color(0xff1c1c1e),
-    bubbleSentBorder: Color(0xffe9e9ed),
-    warnBg: Color(0xff3a2f10),
-    warnText: Color(0xfff0d99a),
-  );
+  factory Palette.of(Brightness b, Accent accent) {
+    final d = b == Brightness.dark;
+    return Palette(
+      dark: d,
+      accent: accent,
+      bg: d ? const Color(0xff0a0a12) : const Color(0xfff5f5fa),
+      surface: d ? const Color(0xff15151f) : Colors.white,
+      surfaceHigh: d ? const Color(0xff1e1e2b) : const Color(0xffeeeef5),
+      border: d ? const Color(0x1fffffff) : const Color(0x14000000),
+      text: d ? const Color(0xfff4f4f8) : const Color(0xff12121a),
+      subtext: d ? const Color(0xff9a9ab0) : const Color(0xff6b6b80),
+      danger: const Color(0xfff43f5e),
+      success: const Color(0xff22c55e),
+      secure: const Color(0xff10b981),
+      warn: const Color(0xfff59e0b),
+      bubbleIn: d ? const Color(0xff1f1f2c) : Colors.white,
+      bubbleInText: d ? const Color(0xfff4f4f8) : const Color(0xff12121a),
+    );
+  }
 
   @override
   Palette copyWith() => this;
@@ -80,22 +123,75 @@ extension PaletteX on BuildContext {
   Palette get p => Theme.of(this).extension<Palette>()!;
 }
 
-ThemeData buildTheme(Brightness b) {
-  final p = b == Brightness.dark ? Palette.dark : Palette.light;
-  return ThemeData(
+const fontFamily = 'packages/chatters_shared/Vazirmatn';
+
+ThemeData buildTheme(Brightness b, Accent accent) {
+  final p = Palette.of(b, accent);
+  final base = ThemeData(
     useMaterial3: true,
     brightness: b,
-    colorScheme: ColorScheme.fromSeed(seedColor: p.primary, brightness: b, primary: p.primary),
+    fontFamily: fontFamily,
+    colorScheme: ColorScheme.fromSeed(
+      seedColor: accent.a,
+      brightness: b,
+      primary: accent.a,
+      secondary: accent.b,
+      surface: p.surface,
+      error: p.danger,
+    ),
+  );
+  return base.copyWith(
     scaffoldBackgroundColor: p.bg,
-    appBarTheme: AppBarTheme(backgroundColor: p.card, foregroundColor: p.text, elevation: 0),
-    cardColor: p.card,
+    splashFactory: InkSparkle.splashFactory,
+    appBarTheme: AppBarTheme(
+      backgroundColor: Colors.transparent,
+      surfaceTintColor: Colors.transparent,
+      foregroundColor: p.text,
+      elevation: 0,
+      scrolledUnderElevation: 0,
+      centerTitle: false,
+      systemOverlayStyle: p.dark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
+      titleTextStyle: TextStyle(fontFamily: fontFamily, color: p.text, fontSize: 20, fontWeight: FontWeight.w700),
+    ),
     dividerColor: p.border,
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: p.card,
-      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-      contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+      fillColor: p.surfaceHigh,
+      hintStyle: TextStyle(color: p.subtext),
+      labelStyle: TextStyle(color: p.subtext),
+      contentPadding: const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+      border: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: BorderSide.none),
+      enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(18), borderSide: BorderSide.none),
+      focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(18), borderSide: BorderSide(color: accent.a, width: 1.6)),
     ),
+    bottomSheetTheme: BottomSheetThemeData(
+      backgroundColor: p.surface,
+      surfaceTintColor: Colors.transparent,
+      showDragHandle: true,
+      dragHandleColor: p.subtext.withValues(alpha: 0.4),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(28))),
+    ),
+    dialogTheme: DialogThemeData(
+      backgroundColor: p.surface,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+    ),
+    snackBarTheme: SnackBarThemeData(
+      behavior: SnackBarBehavior.floating,
+      backgroundColor: p.dark ? const Color(0xff2a2a3a) : const Color(0xff1c1c28),
+      contentTextStyle: const TextStyle(fontFamily: fontFamily, color: Colors.white),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+    ),
+    popupMenuTheme: PopupMenuThemeData(
+      color: p.surface,
+      surfaceTintColor: Colors.transparent,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
+    ),
+    pageTransitionsTheme: const PageTransitionsTheme(builders: {
+      TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
+      TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+    }),
     extensions: [p],
   );
 }

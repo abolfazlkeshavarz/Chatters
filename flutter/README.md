@@ -15,14 +15,30 @@ package, so a fix in `chatters_shared` lands on both platforms.
 
 ## Features
 
-Sign in / request an account, chat list with unread counts and live updates,
-1:1 and group chats, contacts, replies, photo / camera / file attachments
-(images inline with a zoomable viewer, files via the share sheet), avatars and
-avatar visibility, three-state receipts (sent / delivered / read), per-chat mute,
-deleting messages (for me / for everyone) and chats, **secret chats** (P-256
-ECDH + AES-GCM, accept / reject, self-destruct timers, safety-number
-verification), profile (username / password changes), and the admin panel
-(stats, users, roles, password resets, encrypted-message retention).
+**Design.** A "glass and aurora" design system: animated gradient backdrops,
+frosted-glass bars and sheets, gradient message bubbles, five accent themes
+(Aurora, Ocean, Sunset, Mint, Grape), light / dark / automatic mode, an
+optional chat wallpaper, the Vazirmatn typeface (Persian + Latin), haptics and
+spring animations throughout. All preferences are stored on the device.
+
+**Chats.** Large-title chat list with search, All / Unread / Groups / Secret
+filters, a contacts row, announcement cards from the admin, swipe right to
+mute and left to delete, and an unread badge on the tab bar. Conversations
+group consecutive messages, show day separators and read ticks
+(sent / delivered / read), render emoji-only messages large, support
+swipe-to-reply, a long-press action sheet (reply, copy, share, delete for me /
+everyone), inline photos with a zoomable, swipe-to-dismiss viewer, file cards,
+and a jump-to-latest button with a new-message counter.
+
+**Secret chats.** P-256 ECDH + AES-GCM end-to-end encryption, invitation
+screen with accept / decline, self-destruct timers with live countdowns and a
+safety-number verification sheet.
+
+**Contacts & settings.** Alphabetical contacts with quick Message / Secret chat
+actions, new-group builder, profile photo (library or camera) and visibility,
+username and password changes.
+
+Administration is intentionally not in the apps; admins use the web panel.
 
 The crypto in `chatters_shared/lib/src/crypto/e2ee.dart` is tested against a
 fixture produced by the web app's `frontend/src/crypto/e2ee.js`

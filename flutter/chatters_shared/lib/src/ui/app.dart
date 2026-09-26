@@ -15,6 +15,7 @@ final navigatorKey = GlobalKey<NavigatorState>();
 Future<void> runChattersApp() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Storage.hydrate();
+  await AppSettings.instance.load();
   Auth.instance.init();
   Notifications.instance.onOpenChat = (chatId) {
     navigatorKey.currentState?.push(MaterialPageRoute(builder: (_) => ChatScreen(chatId: chatId)));
@@ -34,12 +35,14 @@ class _ChattersAppState extends State<ChattersApp> with WidgetsBindingObserver {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     Auth.instance.addListener(_onAuth);
+    AppSettings.instance.addListener(_rebuild);
     if (Auth.instance.signedIn) Notifications.instance.init();
   }
 
+  void _rebuild() => setState(() {});
+
   void _onAuth() {
     if (Auth.instance.signedIn) Notifications.instance.init();
-    // Leave any pushed chat routes behind on sign-in / sign-out.
     navigatorKey.currentState?.popUntil((r) => r.isFirst);
     setState(() {});
   }
@@ -54,18 +57,28 @@ class _ChattersAppState extends State<ChattersApp> with WidgetsBindingObserver {
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
     Auth.instance.removeListener(_onAuth);
+    AppSettings.instance.removeListener(_rebuild);
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
+    final s = AppSettings.instance;
     return MaterialApp(
       title: 'Chatters',
       navigatorKey: navigatorKey,
       debugShowCheckedModeBanner: false,
-      theme: buildTheme(Brightness.light),
-      darkTheme: buildTheme(Brightness.dark),
-      home: Auth.instance.signedIn ? const HomeScreen() : const LoginScreen(),
+      themeMode: s.mode,
+      theme: buildTheme(Brightness.light, s.accent),
+      darkTheme: buildTheme(Brightness.dark, s.accent),
+      themeAnimationDuration: const Duration(milliseconds: 350),
+      home: AnimatedSwitcher(
+        duration: const Duration(milliseconds: 450),
+        switchInCurve: Curves.easeOutCubic,
+        child: Auth.instance.signedIn
+            ? const HomeScreen(key: ValueKey('home'))
+            : const LoginScreen(key: ValueKey('login')),
+      ),
     );
   }
 }
