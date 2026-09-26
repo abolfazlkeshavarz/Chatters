@@ -1,8 +1,10 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import ChatList from "./ChatList";
 import Profile from "./Profile";
 import Admin from "./Admin";
 import PublicFiles from "./PublicFiles";
+import News from "./News";
+import { getDeveloperInfo, hasUnseenNews } from "../api/developer";
 import { getMe } from "../api/auth";
 
 export default function Home({ onLogout, initialChatId }) {
@@ -28,6 +30,15 @@ export default function Home({ onLogout, initialChatId }) {
     };
   }, []);
 
+  // A dot on the News tab when the developer published something new.
+  const [newsUnread, setNewsUnread] = useState(false);
+  useEffect(() => {
+    getDeveloperInfo()
+      .then((d) => setNewsUnread(hasUnseenNews(d)))
+      .catch(() => {});
+  }, []);
+  const clearNewsDot = useCallback(() => setNewsUnread(false), []);
+
   // A tapped notification jumps straight to the conversation.
   useEffect(() => {
     if (initialChatId) setTab("chats");
@@ -36,6 +47,7 @@ export default function Home({ onLogout, initialChatId }) {
   const tabs = [
     { id: "chats", label: "💬 چت‌ها" },
     { id: "files", label: "📁 فایل‌ها" },
+    { id: "news", label: "📰 اخبار", dot: newsUnread },
     { id: "profile", label: "👤 پروفایل" },
     ...(admin ? [{ id: "admin", label: "🛠️ مدیریت" }] : []),
   ];
@@ -53,6 +65,12 @@ export default function Home({ onLogout, initialChatId }) {
         {/* Manages its own scrolling: the grid is the scroll container so the
             search bar stays pinned above it. */}
         {tab === "files" && <PublicFiles />}
+
+        {tab === "news" && (
+          <div className="scroll-area" style={{ height: "100%" }}>
+            <News onSeen={clearNewsDot} />
+          </div>
+        )}
 
         {/* Full-page views scroll as a whole, unlike the chat pane. */}
         {tab === "profile" && (
@@ -78,7 +96,10 @@ export default function Home({ onLogout, initialChatId }) {
               onClick={() => setTab(t.id)}
               aria-current={tab === t.id ? "page" : undefined}
             >
-              <span style={{ fontSize: 19, lineHeight: 1 }}>{icon}</span>
+              <span style={{ fontSize: 19, lineHeight: 1, position: "relative" }}>
+                {icon}
+                {t.dot && <span style={styles.dot} aria-label="جدید" />}
+              </span>
               <span style={{ fontSize: 11 }}>{rest.join(" ")}</span>
             </button>
           );
@@ -87,3 +108,16 @@ export default function Home({ onLogout, initialChatId }) {
     </div>
   );
 }
+
+const styles = {
+  dot: {
+    position: "absolute",
+    top: -2,
+    insetInlineEnd: -6,
+    width: 9,
+    height: 9,
+    borderRadius: "50%",
+    background: "var(--danger)",
+    border: "2px solid var(--card)",
+  },
+};
