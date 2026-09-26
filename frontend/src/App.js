@@ -5,6 +5,7 @@ import Home from "./pages/Home";
 import { isLoggedIn, logout } from "./api/auth";
 import { onSessionExpired } from "./api/client";
 import { chatSocket } from "./services/websocket";
+import UpdateBanner from "./components/UpdateBanner";
 
 /**
  * Public signup is open, but it does not create an account: the form files a
@@ -64,8 +65,9 @@ export default function App() {
     return undefined;
   }, [loggedIn]);
 
+  let screen;
   if (loggedIn) {
-    return (
+    screen = (
       <Home
         initialChatId={initialChatId}
         onLogout={async () => {
@@ -74,21 +76,28 @@ export default function App() {
         }}
       />
     );
-  }
-
-  if (REGISTRATION_OPEN && page === "register") {
-    return (
+  } else if (REGISTRATION_OPEN && page === "register") {
+    screen = (
       <Register
         onRegister={() => setPage("login")}
         onBack={() => setPage("login")}
       />
     );
+  } else {
+    screen = (
+      <Login
+        onLogin={() => setLoggedIn(true)}
+        onRegister={REGISTRATION_OPEN ? () => setPage("register") : null}
+      />
+    );
   }
 
+  // The banner sits beside the screen rather than inside one, so it shows on
+  // the login page too — a stale login page is the worst place to be stuck.
   return (
-    <Login
-      onLogin={() => setLoggedIn(true)}
-      onRegister={REGISTRATION_OPEN ? () => setPage("register") : null}
-    />
+    <>
+      <UpdateBanner />
+      {screen}
+    </>
   );
 }

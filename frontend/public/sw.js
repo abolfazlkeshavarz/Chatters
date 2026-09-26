@@ -7,13 +7,23 @@
  *   2. Focus (or open) the app when a notification is tapped.
  *   3. Serve the app shell offline so a cold launch with no network still
  *      renders something instead of the browser error page.
+ *   4. Wait, when a new version is installed, until the page asks to switch
+ *      (see the "message" handler). The app then offers an "Update" button.
  *
  * Deliberately NOT cached: anything under /api/. Message data is either
  * private or end-to-end encrypted, and a stale cached copy would be worse
  * than a network error.
  */
 
-const CACHE = "chatters-shell-v1";
+// Replaced with a per-build value by the frontend Dockerfile. Its only job is
+// to make this file's bytes differ on every build: browsers detect a new
+// service worker by comparing the script byte for byte, so without it a
+// deploy that changed only the app bundle would never be noticed here.
+const BUILD_ID = "__BUILD_ID__";
+
+// Per-build, so activating a new version discards the previous build's cache
+// rather than letting hashed assets from every release pile up on the device.
+const CACHE = `chatters-shell-${BUILD_ID}`;
 const SHELL = ["/", "/index.html", "/manifest.json", "/favicon.png", "/logo192.png"];
 
 self.addEventListener("install", (event) => {
@@ -22,8 +32,14 @@ self.addEventListener("install", (event) => {
       .open(CACHE)
       // Individual failures (a missing icon) must not abort the install.
       .then((cache) => Promise.allSettled(SHELL.map((url) => cache.add(url))))
-      .then(() => self.skipWaiting())
+    // No skipWaiting() here on purpose. An installed PWA is rarely fully
+    // closed, so a new worker that took over by itself would swap out from
+    // under a running page. It waits instead, and the page decides when.
   );
+});
+
+self.addEventListener("message", (event) => {
+  if (event.data && event.data.type === "SKIP_WAITING") self.skipWaiting();
 });
 
 self.addEventListener("activate", (event) => {

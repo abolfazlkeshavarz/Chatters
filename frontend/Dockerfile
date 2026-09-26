@@ -17,6 +17,14 @@ COPY public ./public
 COPY src ./src
 RUN npm run build
 
+# Stamp the service worker so its bytes change with every build. That is how
+# an installed PWA notices a new version and offers the Update button. Left
+# to default to the build time; pass --build-arg BUILD_ID=<git sha> to pin it.
+# The layer is cached with the build above, so an unchanged source tree keeps
+# its id and does not prompt anyone to "update" to the same code.
+ARG BUILD_ID=""
+RUN id="${BUILD_ID:-$(date +%s)}" && sed -i "s/__BUILD_ID__/${id}/g" build/sw.js
+
 # --- Runtime stage ---
 FROM nginx:1.27-alpine
 

@@ -1107,3 +1107,48 @@ input[type="color"] {
 .file-action-danger {
   color: var(--danger);
 }
+
+/* ------------------------------------------------------------ update banner */
+
+.update-banner {
+  position: fixed;
+  z-index: 1300;
+  inset-inline: 12px;
+  top: calc(8px + var(--safe-top));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 8px 8px 12px;
+  border-radius: 14px;
+  background: var(--primary);
+  color: var(--primary-contrast);
+  box-shadow: var(--shadow-lg);
+  animation: modal-in 0.24s var(--spring);
+}
+.update-banner-text {
+  flex: 1;
+  min-width: 0;
+  font-size: 14px;
+  font-weight: 500;
+}
+.update-banner-btn {
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 10px;
+  background: #fff;
+  color: var(--primary);
+  font-size: 14px;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.update-banner-btn:disabled {
+  opacity: 0.7;
+}
+.update-banner-close {
+  width: 36px;
+  height: 40px;
+  flex-shrink: 0;
+  color: var(--primary-contrast);
+  opacity: 0.8;
+  font-size: 16px;
+}

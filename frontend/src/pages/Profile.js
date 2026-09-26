@@ -12,6 +12,7 @@ import {
   permission,
   pushSupport,
 } from "../api/push";
+import { checkForUpdate, applyUpdate } from "../serviceWorkerRegistration";
 import { loadIdentity } from "../crypto/keystore";
 import { generateIdentity, wrapIdentity, isSupported } from "../crypto/e2ee";
 
@@ -37,6 +38,8 @@ export default function Profile({ onLogout }) {
   const [hasKey, setHasKey] = useState(false);
   const [pushOn, setPushOn] = useState(false);
   const [pushBusy, setPushBusy] = useState(false);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const [updateState, setUpdateState] = useState(""); // "", "latest", "ready"
 
   const [hasAvatar, setHasAvatar] = useState(false);
   const [avatarVisibility, setVisibility] = useState("public");
@@ -269,6 +272,14 @@ export default function Profile({ onLogout }) {
     }
   }
 
+  async function handleCheckUpdate() {
+    setUpdateBusy(true);
+    setUpdateState("");
+    const ready = await checkForUpdate();
+    setUpdateState(ready ? "ready" : "latest");
+    setUpdateBusy(false);
+  }
+
   return (
     <div className="container stack">
       <h2 style={{ margin: 0 }}>پروفایل</h2>
@@ -418,6 +429,30 @@ export default function Profile({ onLogout }) {
           <div className="muted">
             نکته: Chatters را به صفحه اصلی گوشی اضافه کنید تا اعلان‌ها مطمئن‌تر
             کار کنند و برنامه تمام‌صفحه باز شود.
+          </div>
+        )}
+      </Section>
+
+      <Section title="🔄 به‌روزرسانی برنامه">
+        {updateState === "ready" ? (
+          <button className="btn btn-block" onClick={applyUpdate}>
+            نصب نسخه جدید
+          </button>
+        ) : (
+          <button
+            className="btn btn-secondary btn-block"
+            onClick={handleCheckUpdate}
+            disabled={updateBusy}
+          >
+            {updateBusy ? "در حال بررسی…" : "بررسی نسخه جدید"}
+          </button>
+        )}
+        {updateState === "latest" && (
+          <div className="muted">شما آخرین نسخه را دارید.</div>
+        )}
+        {updateState === "ready" && (
+          <div className="muted">
+            نسخه جدید دریافت شده است. با نصب، برنامه دوباره بارگذاری می‌شود.
           </div>
         )}
       </Section>
