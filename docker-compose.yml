@@ -118,6 +118,10 @@ services:
     environment:
       TURN_SECRET: ${TURN_SECRET:-}
       TURN_EXTERNAL_IP: ${TURN_EXTERNAL_IP:-}
+      # The address coturn binds and relays on. Defaults to TURN_EXTERNAL_IP,
+      # which is right when the public IP sits on the server's interface.
+      # Behind 1:1 NAT (some clouds), set it to the private interface IP.
+      TURN_RELAY_IP: ${TURN_RELAY_IP:-}
       TURN_REALM: ${TURN_REALM:-chatters}
       TURN_MIN_PORT: ${TURN_MIN_PORT:-49160}
       TURN_MAX_PORT: ${TURN_MAX_PORT:-49260}
@@ -126,7 +130,11 @@ services:
       - |
         [ -n "$$TURN_SECRET" ] || { echo "coturn: TURN_SECRET is empty - run 'make secrets'"; exit 1; }
         [ -n "$$TURN_EXTERNAL_IP" ] || { echo "coturn: set TURN_EXTERNAL_IP to this server's public IP in .env"; exit 1; }
+        RELAY="$${TURN_RELAY_IP:-$$TURN_EXTERNAL_IP}"
+        # Bind only the real address (plus loopback for local tests), not
+        # every Docker bridge network on the host.
         exec turnserver -n --log-file=stdout --listening-port=3478 --fingerprint \
+          --listening-ip="$$RELAY" --listening-ip=127.0.0.1 --relay-ip="$$RELAY" \
           --use-auth-secret --static-auth-secret="$$TURN_SECRET" --realm="$$TURN_REALM" \
           --external-ip="$$TURN_EXTERNAL_IP" --min-port="$$TURN_MIN_PORT" --max-port="$$TURN_MAX_PORT" \
           --no-cli --no-tls --no-dtls --no-multicast-peers \
