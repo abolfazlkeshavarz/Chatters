@@ -1,0 +1,93 @@
+# Chatters — Flutter apps
+
+Native Android and iOS clients for the Chatters backend, written in Flutter.
+The backend is unchanged: the apps call the same REST API and WebSocket as the
+web app, and stay wire-compatible with its end-to-end encryption.
+
+| Directory | What it is |
+| --- | --- |
+| `chatters_shared/` | All app code: API client, WebSocket, E2EE crypto, screens. Used by both apps. |
+| `chatters_android/` | The Android app (Android platform only). |
+| `chatters_ios/` | The iOS app (iOS platform only). |
+
+Each app's `lib/main.dart` just calls `runChattersApp()` from the shared
+package, so a fix in `chatters_shared` lands on both platforms.
+
+## Features
+
+Sign in / request an account, chat list with unread counts and live updates,
+1:1 and group chats, contacts, replies, photo / camera / file attachments
+(images inline with a zoomable viewer, files via the share sheet), avatars and
+avatar visibility, three-state receipts (sent / delivered / read), per-chat mute,
+deleting messages (for me / for everyone) and chats, **secret chats** (P-256
+ECDH + AES-GCM, accept / reject, self-destruct timers, safety-number
+verification), profile (username / password changes), and the admin panel
+(stats, users, roles, password resets, encrypted-message retention).
+
+The crypto in `chatters_shared/lib/src/crypto/e2ee.dart` is tested against a
+fixture produced by the web app's `frontend/src/crypto/e2ee.js`
+(`chatters_shared/test/e2ee_test.dart`), so keys and messages move freely
+between the web, the old React Native app and these apps.
+
+## Backend URL
+
+Defaults to `https://chat.abolfazl.fun`. Override at build time:
+
+```bash
+flutter build apk --dart-define=API_BASE=https://your.server
+```
+
+## Android APK
+
+The **Build Flutter Android APK** workflow (`.github/workflows/flutter-android-apk.yml`)
+builds `chatters.apk` on every push that touches `flutter/`, and publishes it on
+the GitHub Release **`flutter-android-latest`** (also kept as a workflow
+artifact). Download it on the phone and install (allow "install unknown apps").
+
+Build locally instead:
+
+```bash
+cd flutter/chatters_android
+flutter pub get
+flutter build apk --release
+# -> build/app/outputs/flutter-apk/app-release.apk
+```
+
+**Signing.** Without a keystore the release APK is signed with a debug key: it
+installs fine, but an APK built on another machine / CI run cannot upgrade it
+in place (uninstall first). For stable updates create a keystore once:
+
+```bash
+keytool -genkey -v -keystore chatters.jks -keyalg RSA -keysize 2048 -validity 10000 -alias chatters
+```
+
+then either add `flutter/chatters_android/android/key.properties`
+(`storeFile=`, `storePassword=`, `keyAlias=`, `keyPassword=`; it is git-ignored)
+or set the repo secrets `CHATTERS_KEYSTORE_BASE64` (`base64 -w0 chatters.jks`),
+`CHATTERS_KEYSTORE_PASSWORD`, `CHATTERS_KEY_ALIAS`, `CHATTERS_KEY_PASSWORD`.
+
+## iOS
+
+Code only for now: it needs a Mac with Xcode to build and an Apple Developer
+account to install on devices / ship.
+
+```bash
+cd flutter/chatters_ios
+flutter pub get
+open ios/Runner.xcworkspace     # set your Team under Signing & Capabilities
+flutter run --release           # on a connected iPhone
+flutter build ipa               # for TestFlight / App Store
+```
+
+Bundle id is `com.chatters.messenger` (change it in Xcode if it is taken). The
+**Check Flutter iOS build** workflow does an unsigned compile on a macOS runner
+(manual trigger).
+
+## Notifications
+
+The apps show a local notification for new messages that arrive over the live
+connection while that chat is not open (including shortly after the app goes
+to the background). True background push when the app is fully closed needs
+Firebase Cloud Messaging / APNs keys plus a backend sender; the backend today
+only sends Web Push and Expo push (for the React Native app), so that is left
+for the deployment phase.

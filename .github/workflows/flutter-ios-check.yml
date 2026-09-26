@@ -1,0 +1,25 @@
+# Compile check for the Flutter iOS app (flutter/chatters_ios) without code
+# signing. Manual only: macOS runners are billed at a higher rate. Producing an
+# installable IPA needs an Apple Developer account; see flutter/README.md.
+name: Check Flutter iOS build
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ios:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.5
+          channel: stable
+          cache: true
+
+      - name: Build (no codesign)
+        working-directory: flutter/chatters_ios
+        run: |
+          flutter pub get
+          flutter build ios --release --no-codesign --dart-define=API_BASE="${{ vars.CHATTERS_API_BASE || 'https://chat.abolfazl.fun' }}"

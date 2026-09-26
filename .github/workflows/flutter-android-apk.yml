@@ -1,0 +1,87 @@
+# Builds the Flutter Android app (flutter/chatters_android) into a release APK,
+# uploads it as a workflow artifact and publishes it on a GitHub Release
+# ("flutter-android-latest") so it can be downloaded straight to a phone.
+#
+# Optional signing secrets (otherwise the APK is signed with a debug key, which
+# installs fine but cannot be upgraded in place by an APK from another run):
+#   CHATTERS_KEYSTORE_BASE64   base64 of your .jks keystore
+#   CHATTERS_KEYSTORE_PASSWORD
+#   CHATTERS_KEY_ALIAS
+#   CHATTERS_KEY_PASSWORD
+# Optional repo variable CHATTERS_API_BASE overrides the backend URL.
+name: Build Flutter Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "flutter/**"
+      - ".github/workflows/flutter-android-apk.yml"
+
+permissions:
+  contents: write
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    env:
+      API_BASE: ${{ vars.CHATTERS_API_BASE || 'https://chat.abolfazl.fun' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.47.5
+          channel: stable
+          cache: true
+
+      - name: Test shared code
+        working-directory: flutter/chatters_shared
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter test
+
+      - name: Decode signing keystore
+        env:
+          KEYSTORE_B64: ${{ secrets.CHATTERS_KEYSTORE_BASE64 }}
+        if: env.KEYSTORE_B64 != ''
+        run: |
+          echo "$KEYSTORE_B64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          echo "CHATTERS_KEYSTORE_PATH=$RUNNER_TEMP/release.jks" >> "$GITHUB_ENV"
+
+      - name: Build APK
+        working-directory: flutter/chatters_android
+        env:
+          CHATTERS_KEYSTORE_PASSWORD: ${{ secrets.CHATTERS_KEYSTORE_PASSWORD }}
+          CHATTERS_KEY_ALIAS: ${{ secrets.CHATTERS_KEY_ALIAS }}
+          CHATTERS_KEY_PASSWORD: ${{ secrets.CHATTERS_KEY_PASSWORD }}
+        run: |
+          flutter pub get
+          flutter analyze
+          flutter build apk --release --dart-define=API_BASE="$API_BASE"
+          cp build/app/outputs/flutter-apk/app-release.apk "$GITHUB_WORKSPACE/chatters.apk"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chatters-flutter-apk
+          path: chatters.apk
+          if-no-files-found: error
+
+      - name: Publish to the flutter-android-latest release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          notes="Flutter Android build of ${GITHUB_SHA::7} from ${GITHUB_REF_NAME}. Backend: $API_BASE"
+          if gh release view flutter-android-latest >/dev/null 2>&1; then
+            gh release upload flutter-android-latest chatters.apk --clobber
+            gh release edit flutter-android-latest --notes "$notes"
+          else
+            gh release create flutter-android-latest chatters.apk --prerelease \
+              --title "Chatters Android (Flutter)" --notes "$notes" --target "$GITHUB_SHA"
+          fi
