@@ -138,7 +138,7 @@ services:
           --use-auth-secret --static-auth-secret="$$TURN_SECRET" --realm="$$TURN_REALM" \
           --external-ip="$$TURN_EXTERNAL_IP" --min-port="$$TURN_MIN_PORT" --max-port="$$TURN_MAX_PORT" \
           --no-cli --no-tls --no-dtls --no-multicast-peers \
-          --user-quota=4 --total-quota=200 \
+          --user-quota=12 --total-quota=300 \
           --denied-peer-ip=0.0.0.0-0.255.255.255 \
           --denied-peer-ip=10.0.0.0-10.255.255.255 \
           --denied-peer-ip=100.64.0.0-100.127.255.255 \
