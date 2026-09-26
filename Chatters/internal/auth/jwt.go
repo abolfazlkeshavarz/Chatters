@@ -16,12 +16,19 @@ var ErrInvalidToken = errors.New("invalid token")
 // GenerateToken issues an API token. version is the user's token_version at
 // issue time; the auth middleware rejects the token once that value moves,
 // which is how password changes and admin actions kill existing sessions.
-func GenerateToken(userID string, version int) (string, error) {
+//
+// sessionID ties the token to a row in the sessions table (see
+// SessionID); an empty one issues a session-less token.
+func GenerateToken(userID string, version int, sessionID string) (string, error) {
 	claims := jwt.MapClaims{
 		"user_id": userID,
 		"ver":     version,
 		"iat":     time.Now().Unix(),
 		"exp":     time.Now().Add(TokenTTL).Unix(),
+	}
+
+	if sessionID != "" {
+		claims["sid"] = sessionID
 	}
 
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -58,4 +65,11 @@ func TokenVersion(claims jwt.MapClaims) int {
 		return v
 	}
 	return 0
+}
+
+// SessionID returns the token's "sid" claim, or "" for tokens issued before
+// sessions existed (they stay valid until they expire).
+func SessionID(claims jwt.MapClaims) string {
+	sid, _ := claims["sid"].(string)
+	return sid
 }

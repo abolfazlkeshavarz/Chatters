@@ -207,6 +207,14 @@ func main() {
 		protected.POST("/push/device", handlers.RegisterDevice)
 		protected.POST("/push/device/unregister", handlers.UnregisterDevice)
 
+		protected.GET("/sessions", handlers.ListSessions)
+		protected.DELETE("/sessions/:id", handlers.RevokeSession)
+		protected.POST("/sessions/revoke-others", handlers.RevokeOtherSessions)
+
+		protected.GET("/calls/ice-servers", handlers.IceServers)
+
+		protected.GET("/developer", handlers.GetDeveloperInfo)
+
 		admin := protected.Group("/admin", middleware.AdminMiddleware())
 		{
 			admin.GET("/stats", handlers.AdminStats)
@@ -254,6 +262,12 @@ func main() {
 			admin.GET("/announcements/:id/readers", handlers.AdminAnnouncementReaders)
 
 			admin.GET("/audit", handlers.AdminAuditLog)
+
+			admin.GET("/developer", handlers.AdminGetDeveloperInfo)
+			admin.PUT("/developer/profile", handlers.AdminUpdateDeveloperProfile)
+			admin.POST("/developer/posts", handlers.AdminCreateDeveloperPost)
+			admin.PUT("/developer/posts/:id", handlers.AdminUpdateDeveloperPost)
+			admin.DELETE("/developer/posts/:id", handlers.AdminDeleteDeveloperPost)
 		}
 	}
 

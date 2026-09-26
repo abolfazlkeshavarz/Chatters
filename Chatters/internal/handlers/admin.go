@@ -225,6 +225,9 @@ func AdminResetPassword(c *gin.Context) {
 		c.JSON(http.StatusNotFound, gin.H{"error": "user not found"})
 		return
 	}
+	// The version bump already rejects every token; drop the rows too so the
+	// user's session list does not show devices that are signed out.
+	_, _ = db.DB.Exec(`DELETE FROM sessions WHERE user_id = $1`, target)
 
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "password reset",

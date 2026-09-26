@@ -28,11 +28,30 @@ type Config struct {
 	AdminEmail      string
 	TrustedProxies  []string
 	RedisURL        string
+
+	// Voice calls. STUNURLs and TURNURLs are handed to the apps as WebRTC ICE
+	// servers; TURNSecret is coturn's static-auth-secret, used to mint
+	// short-lived TURN credentials (the "TURN REST API" scheme) so the relay
+	// cannot be used by anyone who is not signed in.
+	STUNURLs   []string
+	TURNURLs   []string
+	TURNSecret string
 }
 
 var C Config
 
 const defaultSecret = "CHANGE_THIS_SECRET"
+
+// envList splits a comma-separated variable, dropping blanks.
+func envList(key string) []string {
+	var out []string
+	for _, v := range strings.Split(os.Getenv(key), ",") {
+		if v = strings.TrimSpace(v); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
+}
 
 func env(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
@@ -99,6 +118,9 @@ func Load() {
 		AdminEmail:      os.Getenv("ADMIN_EMAIL"),
 		TrustedProxies:  trustedProxies(),
 		RedisURL:        os.Getenv("REDIS_URL"),
+		STUNURLs:        envList("STUN_URLS"),
+		TURNURLs:        envList("TURN_URLS"),
+		TURNSecret:      os.Getenv("TURN_SECRET"),
 	}
 }
 

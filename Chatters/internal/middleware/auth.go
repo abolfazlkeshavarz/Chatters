@@ -58,10 +58,36 @@ func AuthMiddleware() gin.HandlerFunc {
 			return
 		}
 
+		sid := auth.SessionID(claims)
+		if sid != "" && !touchSession(sid, userID) {
+			c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{"error": "session expired"})
+			return
+		}
+
 		c.Set("user_id", userID)
 		c.Set("is_admin", isAdmin)
+		c.Set("session_id", sid)
 		c.Next()
 	}
+}
+
+// touchSession reports whether the session still exists (it is deleted when
+// the user signs that device out) and bumps its last-seen time, at most once
+// a minute so ordinary API traffic does not turn into a write per request.
+func touchSession(sid, userID string) bool {
+	var stale bool
+	err := db.DB.QueryRow(
+		`SELECT last_seen_at < now() - interval '1 minute'
+		 FROM sessions WHERE id = $1 AND user_id = $2 AND expires_at > now()`,
+		sid, userID,
+	).Scan(&stale)
+	if err != nil {
+		return false
+	}
+	if stale {
+		_, _ = db.DB.Exec(`UPDATE sessions SET last_seen_at = now() WHERE id = $1`, sid)
+	}
+	return true
 }
 
 // AdminMiddleware must run after AuthMiddleware.

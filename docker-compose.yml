@@ -79,6 +79,12 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-}
+
+      # Voice calls (WebRTC). The apps get these as ICE servers from
+      # GET /api/calls/ice-servers; see the coturn service below.
+      STUN_URLS: ${STUN_URLS:-}
+      TURN_URLS: ${TURN_URLS:-}
+      TURN_SECRET: ${TURN_SECRET:-}
     volumes:
       - uploads:/app/private_uploads
     healthcheck:
@@ -92,6 +98,46 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+
+  # TURN relay for voice calls. Most phones sit behind carrier NAT that
+  # blocks direct peer-to-peer audio; TURN relays it (still encrypted end to
+  # end by WebRTC — coturn only sees SRTP packets). Off unless enabled with
+  # COMPOSE_PROFILES=calls in .env.
+  #
+  # Host networking because TURN needs a large UDP port range, which Docker's
+  # port publishing handles badly. Open in the firewall: 3478/udp+tcp and
+  # the relay range (TURN_MIN_PORT-TURN_MAX_PORT)/udp.
+  coturn:
+    image: coturn/coturn:4.6
+    profiles: ["calls"]
+    restart: unless-stopped
+    network_mode: host
+    command:
+      - -n
+      - --log-file=stdout
+      - --listening-port=3478
+      - --fingerprint
+      - --use-auth-secret
+      - --static-auth-secret=${TURN_SECRET:?TURN_SECRET must be set - run "make secrets"}
+      - --realm=${TURN_REALM:-chatters}
+      - --external-ip=${TURN_EXTERNAL_IP:?TURN_EXTERNAL_IP must be set to the server's public IP}
+      - --min-port=${TURN_MIN_PORT:-49160}
+      - --max-port=${TURN_MAX_PORT:-49260}
+      - --no-cli
+      - --no-tls
+      - --no-dtls
+      - --no-multicast-peers
+      # Never relay into private networks: stops the relay from being used to
+      # reach services on the server's LAN or Docker networks.
+      - --denied-peer-ip=0.0.0.0-0.255.255.255
+      - --denied-peer-ip=10.0.0.0-10.255.255.255
+      - --denied-peer-ip=100.64.0.0-100.127.255.255
+      - --denied-peer-ip=127.0.0.0-127.255.255.255
+      - --denied-peer-ip=169.254.0.0-169.254.255.255
+      - --denied-peer-ip=172.16.0.0-172.31.255.255
+      - --denied-peer-ip=192.168.0.0-192.168.255.255
+      - --user-quota=4
+      - --total-quota=200
 
   frontend:
     build:

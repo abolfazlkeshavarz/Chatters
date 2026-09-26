@@ -40,6 +40,8 @@ random_secret() {
 
 echo "Filling secrets in .env"
 set_if_empty JWT_SECRET "$(random_secret)"
+# Shared between the backend and coturn; see the voice-calls block in .env.
+set_if_empty TURN_SECRET "$(random_secret)"
 
 # Web Push (VAPID) keys.
 #

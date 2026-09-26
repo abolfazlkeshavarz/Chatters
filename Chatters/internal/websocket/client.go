@@ -120,6 +120,13 @@ func readPump(hub *Hub, client *Client) {
 			continue
 		}
 
+		if IsCallEvent(msg.Type) {
+			// Relayed as raw JSON: SDP and ICE fields are not part of
+			// ChatMessage and must pass through untouched.
+			handleCallEvent(hub, client, message)
+			continue
+		}
+
 		switch msg.Type {
 		case "ping":
 			// Application-level heartbeat from the browser, which cannot send

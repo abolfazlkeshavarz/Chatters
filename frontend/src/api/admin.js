@@ -180,3 +180,25 @@ export function getAuditLog({ action = "", limit = 100 } = {}) {
   const params = new URLSearchParams({ action, limit });
   return api.get(`/api/admin/audit?${params}`);
 }
+
+/* --------------------------------------------------- developer page (apps) */
+
+export function getDeveloperInfo() {
+  return api.get("/api/admin/developer");
+}
+
+export function saveDeveloperProfile(profile) {
+  return api.put("/api/admin/developer/profile", profile);
+}
+
+export function createDeveloperPost(post) {
+  return api.post("/api/admin/developer/posts", post);
+}
+
+export function updateDeveloperPost(id, post) {
+  return api.put(`/api/admin/developer/posts/${encodeURIComponent(id)}`, post);
+}
+
+export function deleteDeveloperPost(id) {
+  return api.del(`/api/admin/developer/posts/${encodeURIComponent(id)}`);
+}

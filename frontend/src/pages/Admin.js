@@ -16,6 +16,7 @@ import AdminPhones from "./AdminPhones";
 import AdminAnnouncements from "./AdminAnnouncements";
 import AdminFiles from "./AdminFiles";
 import AdminAudit from "./AdminAudit";
+import AdminDeveloper from "./AdminDeveloper";
 import AdminUserDetail from "../components/AdminUserDetail";
 import Modal from "../components/Modal";
 
@@ -382,6 +383,7 @@ export default function Admin() {
           { id: "chats", label: "Chats & messages" },
           { id: "files", label: "Public library" },
           { id: "announcements", label: "Announcements" },
+          { id: "developer", label: "Developer page" },
           { id: "audit", label: "Audit log" },
         ].map((t) => (
           <button
@@ -414,6 +416,7 @@ export default function Admin() {
       {tab === "announcements" && (
         <AdminAnnouncements onNotice={flash} onError={setError} />
       )}
+      {tab === "developer" && <AdminDeveloper onNotice={flash} onError={setError} />}
       {tab === "audit" && <AdminAudit onError={setError} />}
 
       {tab === "users" && (

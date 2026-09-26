@@ -49,6 +49,8 @@ func ChangeUsername(c *gin.Context) {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update username"})
 		return
 	}
+	// Every token was just invalidated; clear the matching session rows.
+	_, _ = db.DB.Exec(`DELETE FROM sessions WHERE user_id = $1`, newUsername)
 
 	c.JSON(http.StatusOK, gin.H{"message": "username updated, please login again"})
 }
@@ -102,6 +104,10 @@ func ChangePassword(c *gin.Context) {
 		`UPDATE users SET password_hash = $1, token_version = token_version + 1 WHERE id = $2`,
 		string(newHash), user,
 	); err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update password"})
+		return
+	}
+	if _, err := tx.Exec(`DELETE FROM sessions WHERE user_id = $1`, user); err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to update password"})
 		return
 	}

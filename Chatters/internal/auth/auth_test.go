@@ -14,7 +14,7 @@ func init() {
 }
 
 func TestTokenRoundTrip(t *testing.T) {
-	token, err := GenerateToken("alice", 3)
+	token, err := GenerateToken("alice", 3, "")
 	if err != nil {
 		t.Fatalf("GenerateToken: %v", err)
 	}
@@ -32,7 +32,7 @@ func TestTokenRoundTrip(t *testing.T) {
 }
 
 func TestTokenRejectsWrongSecret(t *testing.T) {
-	token, err := GenerateToken("alice", 0)
+	token, err := GenerateToken("alice", 0, "")
 	if err != nil {
 		t.Fatalf("GenerateToken: %v", err)
 	}

@@ -140,6 +140,10 @@ func Login(c *gin.Context) {
 	var req struct {
 		Identifier string `json:"username"` // username OR email
 		Password   string `json:"password"`
+		// Optional, shown in the "active sessions" list. Browsers do not
+		// send them and get a label parsed from their User-Agent instead.
+		Device   string `json:"device"`
+		Platform string `json:"platform"`
 	}
 
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -180,7 +184,13 @@ func Login(c *gin.Context) {
 		return
 	}
 
-	token, err := auth.GenerateToken(userID, version)
+	sid, err := createSession(userID, req.Device, req.Platform, c)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to start session"})
+		return
+	}
+
+	token, err := auth.GenerateToken(userID, version, sid)
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to issue token"})
 		return

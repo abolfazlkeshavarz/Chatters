@@ -18,6 +18,7 @@ const FILTERS = [
   { id: "announcement", label: "Announcements" },
   { id: "media", label: "Media access" },
   { id: "public_file", label: "Library" },
+  { id: "developer", label: "Developer page" },
 ];
 
 const ICONS = {
@@ -33,6 +34,10 @@ const ICONS = {
   "announcement.delete": "🗑",
   "media.view": "👁",
   "public_file.delete": "🗑",
+  "developer.profile": "👤",
+  "developer.post.create": "📰",
+  "developer.post.update": "🔁",
+  "developer.post.delete": "🗑",
 };
 
 /**

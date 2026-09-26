@@ -439,6 +439,42 @@ var migrations = []string{
 	   AND (SELECT COUNT(*) FROM chat_members x WHERE x.chat_id = c.id) = 2
 	 ORDER BY LEAST(m1.user_id, m2.user_id), GREATEST(m1.user_id, m2.user_id), c.created_at
 	 ON CONFLICT DO NOTHING`,
+
+	// One row per sign-in, so a user can see where they are signed in and
+	// sign a device out. Tokens carry the row id as "sid"; revoking the row
+	// (or deleting it) makes the auth middleware reject that token at once.
+	`CREATE TABLE IF NOT EXISTS sessions (
+		id           TEXT PRIMARY KEY,
+		user_id      TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE ON UPDATE CASCADE,
+		device       TEXT NOT NULL DEFAULT '',
+		platform     TEXT NOT NULL DEFAULT '',
+		ip           TEXT NOT NULL DEFAULT '',
+		created_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+		last_seen_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+		expires_at   TIMESTAMPTZ NOT NULL
+	)`,
+	`CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id)`,
+
+	// The "Developer & news" page in the apps. One profile row (id is
+	// always 1) and a list of posts, both edited from the web admin panel.
+	`CREATE TABLE IF NOT EXISTS developer_profile (
+		id         INTEGER PRIMARY KEY CHECK (id = 1),
+		name       TEXT NOT NULL DEFAULT '',
+		headline   TEXT NOT NULL DEFAULT '',
+		bio        TEXT NOT NULL DEFAULT '',
+		contacts   JSONB NOT NULL DEFAULT '[]',
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`,
+	`INSERT INTO developer_profile (id) VALUES (1) ON CONFLICT DO NOTHING`,
+	`CREATE TABLE IF NOT EXISTS developer_posts (
+		id         SERIAL PRIMARY KEY,
+		title      TEXT NOT NULL DEFAULT '',
+		body       TEXT NOT NULL DEFAULT '',
+		emoji      TEXT NOT NULL DEFAULT '',
+		pinned     BOOLEAN NOT NULL DEFAULT false,
+		created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+		updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+	)`,
 }
 
 // renameCascades repoints foreign keys at users(id) so that renaming a user
