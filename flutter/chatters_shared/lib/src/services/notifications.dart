@@ -5,6 +5,7 @@ import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 
 import '../storage.dart';
 import 'chat_socket.dart';
+import '../ui/l10n.dart';
 
 /// Local notifications for messages that arrive over the live socket while
 /// the chat is not on screen (or the app is in the background but still
@@ -59,16 +60,16 @@ class Notifications {
     final body = msg['is_encrypted'] == true
         ? '🔒 Encrypted message'
         : type == 'media'
-            ? '📎 ${msg['filename'] ?? 'Attachment'}'
+            ? '📎 ${msg['filename'] ?? t('Attachment')}'
             : (msg['content'] as String? ?? '');
     _plugin.show(
       chatId.hashCode & 0x7fffffff,
       from,
       body,
-      const NotificationDetails(
-        android: AndroidNotificationDetails('messages', 'Messages',
+      NotificationDetails(
+        android: AndroidNotificationDetails('messages', t('Messages'),
             importance: Importance.high, priority: Priority.high),
-        iOS: DarwinNotificationDetails(),
+        iOS: const DarwinNotificationDetails(),
       ),
       payload: chatId,
     );

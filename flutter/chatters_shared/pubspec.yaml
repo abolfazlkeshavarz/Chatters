@@ -10,6 +10,8 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
   http: ^1.2.2
   web_socket_channel: ^3.0.1
   flutter_secure_storage: ^9.2.2
@@ -20,7 +22,7 @@ dependencies:
   share_plus: ^10.0.2
   connectivity_plus: ^6.0.5
   flutter_local_notifications: ^18.0.1
-  intl: ^0.19.0
+  intl: any
 
 dev_dependencies:
   flutter_test:
@@ -39,4 +41,15 @@ flutter:
         - asset: assets/fonts/Vazirmatn-Bold.ttf
           weight: 700
         - asset: assets/fonts/Vazirmatn-ExtraBold.ttf
+          weight: 800
+    - family: Inter
+      fonts:
+        - asset: assets/fonts/Inter-Regular.ttf
+        - asset: assets/fonts/Inter-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Inter-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Inter-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/Inter-ExtraBold.ttf
           weight: 800

@@ -13,19 +13,20 @@ import '../widgets/common.dart';
 import '../widgets/connection_banner.dart';
 import '../widgets/design.dart';
 import 'new_chat_sheet.dart';
+import '../l10n.dart';
 
 String relativeTime(String? ts) {
   final d = ts == null ? null : DateTime.tryParse(ts)?.toLocal();
   if (d == null) return '';
   final now = DateTime.now();
   final diff = now.difference(d);
-  if (diff.inMinutes < 1) return 'now';
-  if (diff.inMinutes < 60) return '${diff.inMinutes}m';
+  if (diff.inMinutes < 1) return t('now');
+  if (diff.inMinutes < 60) return t('{n}m', {'n': diff.inMinutes});
   final today = DateTime(now.year, now.month, now.day);
   final day = DateTime(d.year, d.month, d.day);
   final days = today.difference(day).inDays;
   if (days == 0) return DateFormat.Hm().format(d);
-  if (days == 1) return 'Yesterday';
+  if (days == 1) return t('Yesterday');
   if (days < 7) return DateFormat.E().format(d);
   return DateFormat.MMMd().format(d);
 }
@@ -75,13 +76,13 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final group = chat['is_group'] == true;
     final ok = await confirm(
       context,
-      group ? 'Leave this group?' : 'Delete this chat?',
+      group ? t('Leave this group?') : t('Delete this chat?'),
       secret
-          ? 'The secret chat is deleted for both of you. This cannot be undone.'
+          ? t('The secret chat is deleted for both of you. This cannot be undone.')
           : group
-              ? 'You will stop receiving its messages.'
-              : 'It disappears from your list. The other person keeps their copy.',
-      ok: group ? 'Leave group' : 'Delete chat',
+              ? t('You will stop receiving its messages.')
+              : t('It disappears from your list. The other person keeps their copy.'),
+      ok: group ? t('Leave group') : t('Delete chat'),
       destructive: true,
     );
     if (!ok) return;
@@ -98,7 +99,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final id = chat['id'] as String;
     final next = chat['muted'] != true;
     _store.patch(id, {'muted': next});
-    toast(context, next ? 'Notifications muted' : 'Notifications on');
+    toast(context, next ? t('Notifications muted') : t('Notifications on'));
     try {
       await setChatMute(id, next);
     } catch (_) {
@@ -144,15 +145,15 @@ class _ChatListScreenState extends State<ChatListScreen> {
                   pinned: true,
                   expandedHeight: 116,
                   backgroundColor: p.bg.withValues(alpha: 0.92),
-                  flexibleSpace: const FlexibleSpaceBar(
-                    titlePadding: EdgeInsetsDirectional.only(start: 20, bottom: 14),
-                    title: GradientText('Messages',
-                        style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: -0.6)),
-                    background: AuroraBackground(intensity: 0.45),
+                  flexibleSpace: FlexibleSpaceBar(
+                    titlePadding: const EdgeInsetsDirectional.only(start: 20, bottom: 14),
+                    title: GradientText(t('Messages'),
+                        style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: -0.6)),
+                    background: const AuroraBackground(intensity: 0.45),
                   ),
                   actions: [
                     Padding(
-                      padding: const EdgeInsets.only(right: 16),
+                      padding: const EdgeInsetsDirectional.only(end: 16),
                       child: UserAvatar(userId: me ?? '', size: 38),
                     ),
                   ],
@@ -165,7 +166,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
                       controller: _search,
                       onChanged: (v) => setState(() => _query = v.trim()),
                       decoration: InputDecoration(
-                        hintText: 'Search chats',
+                        hintText: t('Search chats'),
                         prefixIcon: const Icon(Icons.search_rounded),
                         suffixIcon: _query.isEmpty
                             ? null
@@ -202,18 +203,18 @@ class _ChatListScreenState extends State<ChatListScreen> {
                     child: EmptyState(
                       icon: _query.isNotEmpty ? Icons.search_off_rounded : Icons.forum_rounded,
                       title: _query.isNotEmpty
-                          ? 'No matches'
+                          ? t('No matches')
                           : _filter == _Filter.all
-                              ? 'No conversations yet'
-                              : 'Nothing here',
+                              ? t('No conversations yet')
+                              : t('Nothing here'),
                       message: _query.isNotEmpty
-                          ? 'Try a different name.'
-                          : 'Start a chat with someone from your contacts.',
+                          ? t('Try a different name.')
+                          : t('Start a chat with someone from your contacts.'),
                       action: _filter == _Filter.all && _query.isEmpty
                           ? SizedBox(
                               width: 220,
                               child: GradientButton(
-                                  label: 'Start a chat',
+                                  label: t('Start a chat'),
                                   icon: Icons.add_rounded,
                                   onPressed: () => showNewChatSheet(context)))
                           : null,
@@ -248,10 +249,10 @@ class _ChatListScreenState extends State<ChatListScreen> {
     final p = context.p;
     final unread = _store.chats.where((c) => ((c['unread_count'] as int?) ?? 0) > 0).length;
     final items = [
-      (_Filter.all, 'All', null),
-      (_Filter.unread, 'Unread', unread > 0 ? '$unread' : null),
-      (_Filter.groups, 'Groups', null),
-      (_Filter.secret, 'Secret', null),
+      (_Filter.all, t('All'), null),
+      (_Filter.unread, t('Unread'), unread > 0 ? n(unread) : null),
+      (_Filter.groups, t('Groups'), null),
+      (_Filter.secret, t('Secret'), null),
     ];
     return SizedBox(
       height: 52,
@@ -261,7 +262,7 @@ class _ChatListScreenState extends State<ChatListScreen> {
         children: [
           for (final (f, label, count) in items)
             Padding(
-              padding: const EdgeInsets.only(right: 8),
+              padding: const EdgeInsetsDirectional.only(end: 8),
               child: Pressable(
                 onTap: () => setState(() => _filter = f),
                 child: AnimatedContainer(
@@ -438,25 +439,26 @@ class _ChatTile extends StatelessWidget {
         color: unread ? p.text : p.subtext, fontWeight: unread ? FontWeight.w600 : FontWeight.w400, fontSize: 14);
     if (pending) {
       preview = TextSpan(
-          text: chat['e2e_requested_by'] == me ? 'Waiting for them to accept…' : 'Wants to start a secret chat',
+          text: chat['e2e_requested_by'] == me ? t('Waiting for them to accept…') : t('Wants to start a secret chat'),
           style: subStyle.copyWith(color: p.secure, fontWeight: FontWeight.w600));
     } else if (chat['last_is_encrypted'] == true) {
       preview = TextSpan(children: [
         WidgetSpan(child: Icon(Icons.lock_rounded, size: 14, color: p.secure)),
-        TextSpan(text: ' Encrypted message', style: subStyle),
+        TextSpan(text: ' ${t('Encrypted message')}', style: subStyle),
       ]);
     } else if (last != null && last.isNotEmpty) {
       final prefix = chat['last_is_system'] == true
           ? ''
           : sender == me
-              ? 'You: '
+              ? t('You: ')
               : (isGroup && sender != null ? '$sender: ' : '');
       preview = TextSpan(children: [
         if (prefix.isNotEmpty) TextSpan(text: prefix, style: subStyle.copyWith(color: p.primary, fontWeight: FontWeight.w600)),
-        TextSpan(text: last, style: subStyle),
+        // First-strong isolate: the message keeps its own direction.
+        TextSpan(text: '\u2068$last\u2069', style: subStyle),
       ]);
     } else {
-      preview = TextSpan(text: 'No messages yet', style: subStyle.copyWith(fontStyle: FontStyle.italic));
+      preview = TextSpan(text: t('No messages yet'), style: subStyle.copyWith(fontStyle: FontStyle.italic));
     }
 
     return Dismissible(
@@ -470,9 +472,9 @@ class _ChatTile extends StatelessWidget {
         }
         return false;
       },
-      background: _swipeBg(context, Alignment.centerLeft, muted ? Icons.notifications_active_rounded : Icons.notifications_off_rounded,
-          muted ? 'Unmute' : 'Mute', LinearGradient(colors: [p.warn, const Color(0xfffbbf24)])),
-      secondaryBackground: _swipeBg(context, Alignment.centerRight, Icons.delete_rounded, isGroup ? 'Leave' : 'Delete',
+      background: _swipeBg(context, AlignmentDirectional.centerStart, muted ? Icons.notifications_active_rounded : Icons.notifications_off_rounded,
+          muted ? t('Unmute') : t('Mute'), LinearGradient(colors: [p.warn, const Color(0xfffbbf24)])),
+      secondaryBackground: _swipeBg(context, AlignmentDirectional.centerEnd, Icons.delete_rounded, isGroup ? t('Leave') : t('Delete'),
           LinearGradient(colors: [const Color(0xfffb7185), p.danger])),
       child: Pressable(
         scale: 0.98,
@@ -518,8 +520,8 @@ class _ChatTile extends StatelessWidget {
                     curve: Curves.easeOutBack,
                     child: unread
                         ? Padding(
-                            padding: const EdgeInsets.only(left: 8),
-                            child: GradientBadge(unreadCount > 99 ? '99+' : '$unreadCount', muted: muted),
+                            padding: const EdgeInsetsDirectional.only(start: 8),
+                            child: GradientBadge(unreadCount > 99 ? n('99+') : n(unreadCount), muted: muted),
                           )
                         : const SizedBox.shrink(),
                   ),
@@ -532,7 +534,7 @@ class _ChatTile extends StatelessWidget {
     );
   }
 
-  Widget _swipeBg(BuildContext context, Alignment align, IconData icon, String label, Gradient g) {
+  Widget _swipeBg(BuildContext context, AlignmentGeometry align, IconData icon, String label, Gradient g) {
     return Container(
       margin: const EdgeInsets.symmetric(vertical: 3),
       padding: const EdgeInsets.symmetric(horizontal: 28),
@@ -555,7 +557,7 @@ class _ChatTile extends StatelessWidget {
         child: Column(mainAxisSize: MainAxisSize.min, children: [
           SettingsTile(
             icon: Icons.chat_bubble_rounded,
-            title: 'Open chat',
+            title: t('Open chat'),
             onTap: () {
               Navigator.pop(c);
               openChat(context, chat);
@@ -563,7 +565,7 @@ class _ChatTile extends StatelessWidget {
           ),
           SettingsTile(
             icon: muted ? Icons.notifications_active_rounded : Icons.notifications_off_rounded,
-            title: muted ? 'Unmute notifications' : 'Mute notifications',
+            title: muted ? t('Unmute notifications') : t('Mute notifications'),
             gradient: LinearGradient(colors: [context.p.warn, const Color(0xfffbbf24)]),
             onTap: () {
               Navigator.pop(c);
@@ -572,7 +574,7 @@ class _ChatTile extends StatelessWidget {
           ),
           SettingsTile(
             icon: group ? Icons.logout_rounded : Icons.delete_rounded,
-            title: group ? 'Leave group' : 'Delete chat',
+            title: group ? t('Leave group') : t('Delete chat'),
             destructive: true,
             onTap: () {
               Navigator.pop(c);

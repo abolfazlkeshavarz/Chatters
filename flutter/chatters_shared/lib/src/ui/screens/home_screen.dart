@@ -7,6 +7,7 @@ import '../widgets/design.dart';
 import 'chat_list_screen.dart';
 import 'contacts_screen.dart';
 import 'settings_screen.dart';
+import '../l10n.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -17,7 +18,7 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   int _tab = 0;
 
-  static const _items = [
+  static final _items = [
     (Icons.chat_bubble_outline_rounded, Icons.chat_bubble_rounded, 'Chats'),
     (Icons.people_outline_rounded, Icons.people_rounded, 'Contacts'),
     (Icons.settings_outlined, Icons.settings_rounded, 'Settings'),
@@ -61,15 +62,15 @@ class _HomeScreenState extends State<HomeScreen> {
                       Stack(clipBehavior: Clip.none, children: [
                         Icon(_tab == i ? _items[i].$2 : _items[i].$1,
                             color: _tab == i ? Colors.white : p.subtext, size: 24),
-                        if (i == 0) const Positioned(right: -10, top: -6, child: _UnreadDot()),
+                        if (i == 0) const PositionedDirectional(end: -10, top: -6, child: _UnreadDot()),
                       ]),
                       AnimatedSize(
                         duration: const Duration(milliseconds: 300),
                         curve: Curves.easeOutCubic,
                         child: _tab == i
                             ? Padding(
-                                padding: const EdgeInsets.only(left: 8),
-                                child: Text(_items[i].$3,
+                                padding: const EdgeInsetsDirectional.only(start: 8),
+                                child: Text(t(_items[i].$3),
                                     style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w700)),
                               )
                             : const SizedBox.shrink(),
@@ -106,7 +107,7 @@ class _UnreadDot extends StatelessWidget {
               borderRadius: BorderRadius.circular(9),
               border: Border.all(color: context.p.surface, width: 1.5),
             ),
-            child: Text(n > 99 ? '99+' : '$n',
+            child: Text(n > 99 ? persianDigits('99+') : persianDigits('$n'),
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.w800)),
           ),

@@ -4,14 +4,15 @@ import '../api/endpoints.dart';
 import '../services/stores.dart';
 import 'screens/chat_screen.dart';
 import 'widgets/common.dart';
+import 'l10n.dart';
 
 String chatTitle(Map<String, dynamic> chat, String? me) {
   final others = ((chat['members'] as List?) ?? []).cast<String>().where((u) => u != me).toList();
   if (chat['is_group'] == true) {
     final name = chat['name'] as String?;
-    return (name != null && name.isNotEmpty) ? name : (others.isEmpty ? 'Group' : others.join(', '));
+    return (name != null && name.isNotEmpty) ? name : (others.isEmpty ? t('Group') : others.join(', '));
   }
-  return others.isNotEmpty ? others.first : 'Saved messages';
+  return others.isNotEmpty ? others.first : t('Saved messages');
 }
 
 Future<void> openChat(BuildContext context, Map<String, dynamic> chat) async {

@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../../services/chat_socket.dart';
 import '../theme.dart';
+import '../l10n.dart';
 
 /// A slim pill that slides in while the live connection is down.
 class ConnectionBanner extends StatelessWidget {
@@ -13,9 +14,9 @@ class ConnectionBanner extends StatelessWidget {
     final p = context.p;
     final show = status != SocketStatus.online;
     final label = switch (status) {
-      SocketStatus.connecting => 'Connecting…',
-      SocketStatus.reconnecting => 'Reconnecting…',
-      _ => 'Waiting for network…',
+      SocketStatus.connecting => t('Connecting…'),
+      SocketStatus.reconnecting => t('Reconnecting…'),
+      _ => t('Waiting for network…'),
     };
     return AnimatedSize(
       duration: const Duration(milliseconds: 250),

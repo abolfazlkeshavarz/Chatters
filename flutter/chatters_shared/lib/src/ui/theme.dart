@@ -1,8 +1,11 @@
 import 'package:flutter/cupertino.dart' show CupertinoPageTransitionsBuilder;
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import 'package:intl/intl.dart';
 
 import '../storage.dart';
+import 'l10n.dart';
 
 /* ------------------------------------------------------------- accents */
 
@@ -33,6 +36,21 @@ class AppSettings extends ChangeNotifier {
   int accentIndex = 0;
   bool wallpaper = true;
 
+  /// 'system', 'en', 'fa' or 'it'.
+  String language = 'system';
+
+  /// The language actually in use.
+  String get lang {
+    if (language != 'system') return language;
+    final device = PlatformDispatcher.instance.locale.languageCode;
+    return supportedLangs.contains(device) ? device : 'en';
+  }
+
+  void _applyLang() {
+    currentLang = lang;
+    Intl.defaultLocale = lang;
+  }
+
   Accent get accent => accents[accentIndex.clamp(0, accents.length - 1)];
 
   Future<void> load() async {
@@ -40,6 +58,8 @@ class AppSettings extends ChangeNotifier {
     mode = ThemeMode.values.firstWhere((x) => x.name == m, orElse: () => ThemeMode.system);
     accentIndex = int.tryParse(await Storage.readRaw('ui.accent') ?? '') ?? 0;
     wallpaper = (await Storage.readRaw('ui.wallpaper')) != '0';
+    language = await Storage.readRaw('ui.lang') ?? 'system';
+    _applyLang();
   }
 
   void setMode(ThemeMode m) {
@@ -53,6 +73,22 @@ class AppSettings extends ChangeNotifier {
     Storage.writeRaw('ui.accent', '$i');
     HapticFeedback.selectionClick();
     notifyListeners();
+  }
+
+  void setLanguage(String v) {
+    language = v;
+    Storage.writeRaw('ui.lang', v);
+    _applyLang();
+    HapticFeedback.selectionClick();
+    notifyListeners();
+  }
+
+  /// Called when the device language changes while the app runs.
+  void deviceLocaleChanged() {
+    if (language == 'system') {
+      _applyLang();
+      notifyListeners();
+    }
   }
 
   void setWallpaper(bool v) {
@@ -123,7 +159,19 @@ extension PaletteX on BuildContext {
   Palette get p => Theme.of(this).extension<Palette>()!;
 }
 
-const fontFamily = 'packages/chatters_shared/Vazirmatn';
+const _vazirmatn = 'packages/chatters_shared/Vazirmatn';
+const _inter = 'packages/chatters_shared/Inter';
+
+/// On iOS the app uses Apple's own system fonts: SF Pro for Latin text and
+/// SF Arabic (the Persian keyboard's font) for Persian — `null` selects them.
+/// Apple's license does not allow shipping them on Android, so Android uses
+/// the closest open equivalents: Inter (an SF lookalike) and Vazirmatn.
+String? get fontFamily {
+  if (defaultTargetPlatform == TargetPlatform.iOS) return null;
+  return currentLang == 'fa' ? _vazirmatn : _inter;
+}
+
+List<String>? get _fallback => defaultTargetPlatform == TargetPlatform.iOS ? null : const [_vazirmatn];
 
 ThemeData buildTheme(Brightness b, Accent accent) {
   final p = Palette.of(b, accent);
@@ -131,6 +179,7 @@ ThemeData buildTheme(Brightness b, Accent accent) {
     useMaterial3: true,
     brightness: b,
     fontFamily: fontFamily,
+    fontFamilyFallback: _fallback,
     colorScheme: ColorScheme.fromSeed(
       seedColor: accent.a,
       brightness: b,
@@ -151,7 +200,7 @@ ThemeData buildTheme(Brightness b, Accent accent) {
       scrolledUnderElevation: 0,
       centerTitle: false,
       systemOverlayStyle: p.dark ? SystemUiOverlayStyle.light : SystemUiOverlayStyle.dark,
-      titleTextStyle: TextStyle(fontFamily: fontFamily, color: p.text, fontSize: 20, fontWeight: FontWeight.w700),
+      titleTextStyle: TextStyle(fontFamily: fontFamily, fontFamilyFallback: _fallback, color: p.text, fontSize: 20, fontWeight: FontWeight.w700),
     ),
     dividerColor: p.border,
     inputDecorationTheme: InputDecorationTheme(
@@ -180,7 +229,7 @@ ThemeData buildTheme(Brightness b, Accent accent) {
     snackBarTheme: SnackBarThemeData(
       behavior: SnackBarBehavior.floating,
       backgroundColor: p.dark ? const Color(0xff2a2a3a) : const Color(0xff1c1c28),
-      contentTextStyle: const TextStyle(fontFamily: fontFamily, color: Colors.white),
+      contentTextStyle: TextStyle(fontFamily: fontFamily, fontFamilyFallback: _fallback, color: Colors.white),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
     ),
     popupMenuTheme: PopupMenuThemeData(

@@ -13,6 +13,7 @@ import '../theme.dart';
 import 'avatar.dart';
 import 'common.dart';
 import 'design.dart';
+import '../l10n.dart';
 
 bool isMedia(Map m) => m['type'] == 'media' || m['has_file'] == true || m['filename'] != null;
 
@@ -27,7 +28,7 @@ bool isSystem(Map m) =>
     m['type'] == 'system' || m['is_system'] == true || (m['from'] == null && m['is_encrypted'] != true);
 
 String messagePreview(Map m) =>
-    isMedia(m) ? (isImage(m) ? '📷 Photo' : '📎 ${m['filename'] ?? m['content'] ?? 'File'}') : '${m['content'] ?? ''}';
+    isMedia(m) ? (isImage(m) ? t('📷 Photo') : '📎 ${m['filename'] ?? m['content'] ?? t('File')}') : '${m['content'] ?? ''}';
 
 /// 1–3 emoji and nothing else: rendered large, without a bubble.
 bool _emojiOnly(String s) {
@@ -37,22 +38,22 @@ bool _emojiOnly(String s) {
 }
 
 String? _countdown(String expiresAt, DateTime now) {
-  final t = DateTime.tryParse(expiresAt);
-  if (t == null) return null;
-  final secs = (t.difference(now).inMilliseconds / 1000).ceil();
+  final end = DateTime.tryParse(expiresAt);
+  if (end == null) return null;
+  final secs = (end.difference(now).inMilliseconds / 1000).ceil();
   if (secs <= 0) return null;
-  if (secs < 60) return '${secs}s';
-  if (secs < 3600) return '${(secs / 60).ceil()}m';
-  if (secs < 86400) return '${(secs / 3600).ceil()}h';
-  return '${(secs / 86400).ceil()}d';
+  if (secs < 60) return t('{n}s', {'n': secs});
+  if (secs < 3600) return t('{n}m', {'n': (secs / 60).ceil()});
+  if (secs < 86400) return t('{n}h', {'n': (secs / 3600).ceil()});
+  return t('{n}d', {'n': (secs / 86400).ceil()});
 }
 
 String _dayLabel(DateTime d) {
   final now = DateTime.now();
   final today = DateTime(now.year, now.month, now.day);
   final diff = today.difference(DateTime(d.year, d.month, d.day)).inDays;
-  if (diff == 0) return 'Today';
-  if (diff == 1) return 'Yesterday';
+  if (diff == 0) return t('Today');
+  if (diff == 1) return t('Yesterday');
   if (diff < 7) return DateFormat.EEEE().format(d);
   if (d.year == now.year) return DateFormat.MMMMd().format(d);
   return DateFormat.yMMMd().format(d);
@@ -194,9 +195,9 @@ class _MessageListState extends State<MessageList> {
               if (hasHeader) widget.header!,
               const Text('👋', style: TextStyle(fontSize: 64)),
               const SizedBox(height: 12),
-              Text('No messages yet', style: TextStyle(color: p.text, fontSize: 18, fontWeight: FontWeight.w700)),
+              Text(t('No messages yet'), style: TextStyle(color: p.text, fontSize: 18, fontWeight: FontWeight.w700)),
               const SizedBox(height: 4),
-              Text('Say hi and break the ice', style: TextStyle(color: p.subtext)),
+              Text(t('Say hi and break the ice'), style: TextStyle(color: p.subtext)),
             ]),
           ),
         )
@@ -232,7 +233,7 @@ class _MessageListState extends State<MessageList> {
                 child: SizedBox(width: 46, height: 46, child: Icon(Icons.keyboard_arrow_down_rounded, color: p.text, size: 28)),
               ),
               if (_newWhileAway > 0)
-                Positioned(top: -6, right: -4, child: GradientBadge('$_newWhileAway')),
+                Positioned(top: -6, right: -4, child: GradientBadge(n(_newWhileAway))),
             ]),
           ),
         ),
@@ -282,7 +283,7 @@ class _MessageListState extends State<MessageList> {
           children: [
             if (showAvatar)
               Padding(
-                padding: const EdgeInsets.only(right: 6),
+                padding: const EdgeInsetsDirectional.only(end: 6),
                 child: e.last ? UserAvatar(userId: '${m['from']}', size: 30) : const SizedBox(width: 30),
               ),
             Flexible(child: _bubble(m, e, replied, mine)),
@@ -305,11 +306,12 @@ class _MessageListState extends State<MessageList> {
 
     const r = Radius.circular(22);
     const small = Radius.circular(6);
-    final radius = BorderRadius.only(
-      topLeft: !mine && !e.first ? small : r,
-      bottomLeft: !mine && !e.last ? small : (!mine ? small : r),
-      topRight: mine && !e.first ? small : r,
-      bottomRight: mine && !e.last ? small : (mine ? small : r),
+    // Directional, so the tail side mirrors in right-to-left languages.
+    final radius = BorderRadiusDirectional.only(
+      topStart: !mine && !e.first ? small : r,
+      bottomStart: !mine && !e.last ? small : (!mine ? small : r),
+      topEnd: mine && !e.first ? small : r,
+      bottomEnd: mine && !e.last ? small : (mine ? small : r),
     );
 
     final meta = Row(mainAxisSize: MainAxisSize.min, children: [
@@ -354,7 +356,7 @@ class _MessageListState extends State<MessageList> {
         const SizedBox(width: 6),
         Flexible(
           child: Text(
-            m['decryptError'] == 'locked' ? 'Unlock secure chat to read this' : 'Sent to a different key — cannot decrypt',
+            m['decryptError'] == 'locked' ? t('Unlock secure chat to read this') : t('Sent to a different key — cannot decrypt'),
             style: TextStyle(color: fg.withValues(alpha: 0.85), fontStyle: FontStyle.italic),
           ),
         ),
@@ -364,7 +366,7 @@ class _MessageListState extends State<MessageList> {
     } else if (media) {
       body = _FileBody(id: m['id'] as int, name: '${m['filename'] ?? m['content'] ?? 'file'}', fg: fg, mine: mine);
     } else {
-      body = Text(text, style: TextStyle(color: fg, fontSize: 15.5, height: 1.35));
+      body = Text(text, textDirection: dirOf(text), style: TextStyle(color: fg, fontSize: 15.5, height: 1.35));
     }
 
     final showName = widget.group && !mine && e.first;
@@ -397,7 +399,7 @@ class _MessageListState extends State<MessageList> {
           body,
           Padding(
             padding: image ? const EdgeInsets.fromLTRB(0, 4, 6, 2) : const EdgeInsets.only(top: 3),
-            child: Align(alignment: Alignment.bottomRight, widthFactor: 1, child: meta),
+            child: Align(alignment: AlignmentDirectional.bottomEnd, widthFactor: 1, child: meta),
           ),
         ]),
       ),
@@ -413,11 +415,12 @@ class _MessageListState extends State<MessageList> {
       decoration: BoxDecoration(
         color: mine ? Colors.white.withValues(alpha: 0.18) : p.primary.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
-        border: Border(left: BorderSide(color: accent, width: 3)),
+        border: BorderDirectional(start: BorderSide(color: accent, width: 3)),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
         Text('${replied['from']}', style: TextStyle(color: accent, fontSize: 12.5, fontWeight: FontWeight.w700)),
         Text(messagePreview(replied),
+            textDirection: dirOf(messagePreview(replied)),
             maxLines: 2, overflow: TextOverflow.ellipsis, style: TextStyle(color: fg.withValues(alpha: 0.85), fontSize: 13)),
       ]),
     );
@@ -443,30 +446,30 @@ class _MessageListState extends State<MessageList> {
             ),
             const SizedBox(height: 14),
             Row(children: [
-              _ActionButton(Icons.reply_rounded, 'Reply', p.gradient, () {
+              _ActionButton(Icons.reply_rounded, t('Reply'), p.gradient, () {
                 Navigator.pop(c);
                 widget.onReply(m);
               }),
               if (canCopy)
-                _ActionButton(Icons.copy_rounded, 'Copy',
+                _ActionButton(Icons.copy_rounded, t('Copy'),
                     const LinearGradient(colors: [Color(0xff2563eb), Color(0xff06b6d4)]), () {
                   Clipboard.setData(ClipboardData(text: '${m['content'] ?? ''}'));
                   Navigator.pop(c);
-                  toast(context, 'Copied to clipboard');
+                  toast(context, t('Copied to clipboard'));
                 }),
               if (isMedia(m))
-                _ActionButton(Icons.ios_share_rounded, 'Share',
+                _ActionButton(Icons.ios_share_rounded, t('Share'),
                     const LinearGradient(colors: [Color(0xff2563eb), Color(0xff06b6d4)]), () {
                   Navigator.pop(c);
                   shareAttachment(context, m['id'] as int, '${m['filename'] ?? m['content'] ?? 'file'}');
                 }),
-              _ActionButton(Icons.delete_outline_rounded, 'Delete\nfor me',
+              _ActionButton(Icons.delete_outline_rounded, t('Delete\nfor me'),
                   LinearGradient(colors: [p.warn, const Color(0xfffbbf24)]), () {
                 Navigator.pop(c);
                 widget.onDelete(m, 'me');
               }),
               if (canEveryone)
-                _ActionButton(Icons.delete_forever_rounded, 'Delete for\neveryone',
+                _ActionButton(Icons.delete_forever_rounded, t('Delete for\neveryone'),
                     LinearGradient(colors: [const Color(0xfffb7185), p.danger]), () {
                   Navigator.pop(c);
                   widget.onDelete(m, 'everyone');
@@ -531,7 +534,7 @@ class _AppearState extends State<_Appear> with SingleTickerProviderStateMixin {
         opacity: _c.value,
         child: Transform.scale(
           scale: 0.85 + 0.15 * _a.value,
-          alignment: widget.mine ? Alignment.bottomRight : Alignment.bottomLeft,
+          alignment: widget.mine ? AlignmentDirectional.bottomEnd : AlignmentDirectional.bottomStart,
           child: Transform.translate(offset: Offset(0, 16 * (1 - _a.value)), child: child),
         ),
       ),
@@ -570,7 +573,10 @@ class _SwipeToReplyState extends State<_SwipeToReply> with SingleTickerProviderS
     final progress = (_dx.abs() / _threshold).clamp(0.0, 1.0);
     return GestureDetector(
       onHorizontalDragUpdate: (d) {
-        final next = (_dx + d.delta.dx).clamp(widget.mine ? -90.0 : 0.0, widget.mine ? 0.0 : 90.0);
+        // Swipe away from the bubble's own side; mirrored in RTL.
+        final rtl = isRtl;
+        final negative = widget.mine != rtl;
+        final next = (_dx + d.delta.dx).clamp(negative ? -90.0 : 0.0, negative ? 0.0 : 90.0);
         setState(() => _dx = next);
         final armed = _dx.abs() >= _threshold;
         if (armed && !_armed) HapticFeedback.lightImpact();
@@ -582,10 +588,10 @@ class _SwipeToReplyState extends State<_SwipeToReply> with SingleTickerProviderS
         _from = _dx;
         _back.forward(from: 0);
       },
-      child: Stack(alignment: widget.mine ? Alignment.centerRight : Alignment.centerLeft, children: [
-        Positioned(
-          left: widget.mine ? null : 4,
-          right: widget.mine ? 4 : null,
+      child: Stack(alignment: widget.mine ? AlignmentDirectional.centerEnd : AlignmentDirectional.centerStart, children: [
+        PositionedDirectional(
+          start: widget.mine ? null : 4,
+          end: widget.mine ? 4 : null,
           child: Opacity(
             opacity: progress,
             child: Transform.scale(
@@ -710,7 +716,7 @@ class _FileBodyState extends State<_FileBody> {
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
                 style: TextStyle(color: widget.fg, fontWeight: FontWeight.w600)),
-            Text('$ext · Tap to open', style: TextStyle(color: widget.fg.withValues(alpha: 0.7), fontSize: 12)),
+            Text(t('{ext} · Tap to open', {'ext': ext}), style: TextStyle(color: widget.fg.withValues(alpha: 0.7), fontSize: 12)),
           ]),
         ),
       ]),
@@ -729,7 +735,7 @@ Future<void> shareAttachment(BuildContext context, int messageId, String filenam
     await f.writeAsBytes(bytes, flush: true);
     await Share.shareXFiles([XFile(f.path)]);
   } catch (e) {
-    if (context.mounted) toast(context, 'Download failed: ${errText(e)}', error: true);
+    if (context.mounted) toast(context, t('Download failed: {error}', {'error': errText(e)}), error: true);
   }
 }
 

@@ -5,6 +5,7 @@ import '../../services/auth.dart';
 import '../theme.dart';
 import '../widgets/common.dart';
 import '../widgets/design.dart';
+import '../l10n.dart';
 
 class RegisterScreen extends StatefulWidget {
   const RegisterScreen({super.key});
@@ -43,11 +44,11 @@ class _RegisterScreenState extends State<RegisterScreen> {
     FocusScope.of(context).unfocus();
     String? err;
     if (_user.text.trim().isEmpty || _email.text.trim().isEmpty || _pass.text.isEmpty) {
-      err = 'Please fill in every field';
+      err = t('Please fill in every field');
     } else if (_pass.text.length < 8) {
-      err = 'Password must be at least 8 characters';
+      err = t('Password must be at least 8 characters');
     } else if (_pass.text != _pass2.text) {
-      err = 'Passwords do not match';
+      err = t('Passwords do not match');
     }
     if (err != null) {
       HapticFeedback.heavyImpact();
@@ -61,7 +62,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
       final res = await Auth.instance.register(_user.text.trim(), _email.text.trim(), _pass.text);
       HapticFeedback.lightImpact();
       setState(() => _done = (res['message'] as String?) ??
-          'Your request was submitted and is waiting for an administrator to approve it.');
+          t('Your request was submitted and is waiting for an administrator to approve it.'));
     } catch (e) {
       setState(() => _error = errText(e));
     } finally {
@@ -72,7 +73,7 @@ class _RegisterScreenState extends State<RegisterScreen> {
   @override
   Widget build(BuildContext context) {
     final p = context.p;
-    final labels = ['Too short', 'Weak', 'Okay', 'Strong', 'Excellent'];
+    final labels = [t('Too short'), t('Weak'), t('Okay'), t('Strong'), t('Excellent')];
     return Scaffold(
       extendBodyBehindAppBar: true,
       appBar: AppBar(),
@@ -90,18 +91,18 @@ class _RegisterScreenState extends State<RegisterScreen> {
                       ? Column(key: const ValueKey('done'), children: [
                           GradientIcon(Icons.mark_email_read_rounded, size: 96, radius: 32, gradient: p.secureGradient),
                           const SizedBox(height: 24),
-                          Text('Request sent',
+                          Text(t('Request sent'),
                               style: TextStyle(color: p.text, fontSize: 26, fontWeight: FontWeight.w800)),
                           const SizedBox(height: 10),
                           Text(_done, textAlign: TextAlign.center, style: TextStyle(color: p.subtext, height: 1.5)),
                           const SizedBox(height: 28),
-                          GradientButton(label: 'Back to sign in', onPressed: () => Navigator.pop(context)),
+                          GradientButton(label: t('Back to sign in'), onPressed: () => Navigator.pop(context)),
                         ])
                       : Column(key: const ValueKey('form'), crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-                          Text('Create your account',
+                          Text(t('Create your account'),
                               style: TextStyle(color: p.text, fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: -0.5)),
                           const SizedBox(height: 6),
-                          Text('An administrator approves new accounts.', style: TextStyle(color: p.subtext)),
+                          Text(t('An administrator approves new accounts.'), style: TextStyle(color: p.subtext)),
                           const SizedBox(height: 24),
                           Glass(
                             radius: 30,
@@ -111,22 +112,22 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                   controller: _user,
                                   autocorrect: false,
                                   textInputAction: TextInputAction.next,
-                                  decoration: const InputDecoration(
-                                      hintText: 'Username', prefixIcon: Icon(Icons.person_outline_rounded))),
+                                  decoration: InputDecoration(
+                                      hintText: t('Username'), prefixIcon: const Icon(Icons.person_outline_rounded))),
                               const SizedBox(height: 12),
                               TextField(
                                   controller: _email,
                                   keyboardType: TextInputType.emailAddress,
                                   textInputAction: TextInputAction.next,
-                                  decoration: const InputDecoration(
-                                      hintText: 'Email', prefixIcon: Icon(Icons.mail_outline_rounded))),
+                                  decoration: InputDecoration(
+                                      hintText: t('Email'), prefixIcon: const Icon(Icons.mail_outline_rounded))),
                               const SizedBox(height: 12),
                               TextField(
                                 controller: _pass,
                                 obscureText: _hide,
                                 textInputAction: TextInputAction.next,
                                 decoration: InputDecoration(
-                                  hintText: 'Password',
+                                  hintText: t('Password'),
                                   prefixIcon: const Icon(Icons.lock_outline_rounded),
                                   suffixIcon: IconButton(
                                     icon: Icon(_hide ? Icons.visibility_outlined : Icons.visibility_off_outlined),
@@ -159,15 +160,15 @@ class _RegisterScreenState extends State<RegisterScreen> {
                                   controller: _pass2,
                                   obscureText: _hide,
                                   onSubmitted: (_) => _submit(),
-                                  decoration: const InputDecoration(
-                                      hintText: 'Confirm password', prefixIcon: Icon(Icons.lock_reset_rounded))),
+                                  decoration: InputDecoration(
+                                      hintText: t('Confirm password'), prefixIcon: const Icon(Icons.lock_reset_rounded))),
                               if (_error.isNotEmpty)
                                 Padding(
                                   padding: const EdgeInsets.only(top: 12),
                                   child: Text(_error, style: TextStyle(color: p.danger)),
                                 ),
                               const SizedBox(height: 20),
-                              GradientButton(label: 'Send request', busy: _busy, onPressed: _submit),
+                              GradientButton(label: t('Send request'), busy: _busy, onPressed: _submit),
                             ]),
                           ),
                         ]),

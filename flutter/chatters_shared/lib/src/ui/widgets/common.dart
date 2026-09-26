@@ -3,9 +3,10 @@ import 'package:flutter/services.dart';
 
 import '../theme.dart';
 import 'design.dart';
+import '../l10n.dart';
 
 Future<bool> confirm(BuildContext context, String title, String body,
-    {String ok = 'OK', bool destructive = false, IconData? icon}) async {
+    {String? ok, bool destructive = false, IconData? icon}) async {
   final p = context.p;
   final r = await showModalBottomSheet<bool>(
     context: context,
@@ -23,14 +24,14 @@ Future<bool> confirm(BuildContext context, String title, String body,
           Text(body, textAlign: TextAlign.center, style: TextStyle(color: p.subtext, height: 1.5)),
           const SizedBox(height: 24),
           GradientButton(
-            label: ok,
+            label: ok ?? t('OK'),
             onPressed: () => Navigator.pop(c, true),
             gradient: destructive ? LinearGradient(colors: [p.danger, const Color(0xfffb7185)]) : null,
           ),
           const SizedBox(height: 8),
           TextButton(
             onPressed: () => Navigator.pop(c, false),
-            child: Text('Cancel', style: TextStyle(color: p.subtext, fontWeight: FontWeight.w600)),
+            child: Text(t('Cancel'), style: TextStyle(color: p.subtext, fontWeight: FontWeight.w600)),
           ),
         ]),
       ),
@@ -41,7 +42,7 @@ Future<bool> confirm(BuildContext context, String title, String body,
 
 /// A bottom sheet with a single text field and a gradient button.
 Future<String?> promptText(BuildContext context, String title,
-    {String hint = '', bool obscure = false, String ok = 'Save', IconData? icon}) {
+    {String hint = '', bool obscure = false, String? ok, IconData? icon}) {
   final ctl = TextEditingController();
   final p = context.p;
   return showModalBottomSheet<String>(
@@ -60,7 +61,7 @@ Future<String?> promptText(BuildContext context, String title,
           decoration: InputDecoration(hintText: hint, prefixIcon: icon != null ? Icon(icon) : null),
         ),
         const SizedBox(height: 16),
-        GradientButton(label: ok, onPressed: () => Navigator.pop(c, ctl.text)),
+        GradientButton(label: ok ?? t('Save'), onPressed: () => Navigator.pop(c, ctl.text)),
       ]),
     ),
   );

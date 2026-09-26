@@ -38,6 +38,19 @@ safety-number verification sheet.
 actions, new-group builder, profile photo (library or camera) and visibility,
 username and password changes.
 
+**Languages.** English, Persian (فارسی, full right-to-left layout with
+Persian digits) and Italian, switchable in Settings or from the globe button
+on the sign-in screen; "Auto" follows the phone's language. Strings live in
+`chatters_shared/lib/src/ui/l10n.dart`, keyed by the English text. Each
+message picks its own text direction, so English inside Persian (and the
+reverse) reads correctly.
+
+**Fonts.** On iOS the apps use Apple's own system fonts: SF Pro for English
+and Italian, SF Arabic (the font of the Persian keyboard) for Persian. Apple's
+license only allows those fonts on Apple platforms, so Android uses the closest
+open-source equivalents, bundled in `chatters_shared/assets/fonts` (SIL OFL):
+Inter, which is designed in the same style as SF, and Vazirmatn for Persian.
+
 Administration is intentionally not in the apps; admins use the web panel.
 
 The crypto in `chatters_shared/lib/src/crypto/e2ee.dart` is tested against a

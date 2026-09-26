@@ -1,0 +1,535 @@
+import 'package:flutter/widgets.dart';
+
+final _rtlChar = RegExp(r'[\u0590-\u08FF\uFB1D-\uFDFF\uFE70-\uFEFF]');
+final _ltrChar = RegExp(r'[A-Za-z\u00C0-\u024F]');
+
+/// Direction of user-written text, from its first strong character, so an
+/// English message reads correctly inside the Persian layout and vice versa.
+TextDirection dirOf(String s) {
+  for (final ch in s.runes) {
+    final c = String.fromCharCode(ch);
+    if (_rtlChar.hasMatch(c)) return TextDirection.rtl;
+    if (_ltrChar.hasMatch(c)) return TextDirection.ltr;
+  }
+  return isRtl ? TextDirection.rtl : TextDirection.ltr;
+}
+
+/// Minimal translation layer. Keys are the English strings, so English needs
+/// no table. `{name}` placeholders are filled from [args].
+///
+/// The language lives in [AppSettings]; [currentLang] is updated whenever it
+/// changes and the whole widget tree is rebuilt.
+String currentLang = 'en';
+
+const supportedLangs = ['en', 'fa', 'it'];
+
+bool get isRtl => currentLang == 'fa';
+
+String t(String key, [Map<String, Object?> args = const {}]) {
+  var s = (_tables[currentLang]?[key]) ?? key;
+  args.forEach((k, v) => s = s.replaceAll('{$k}', '$v'));
+  if (currentLang == 'fa') s = persianDigits(s);
+  return s;
+}
+
+const _fa = '۰۱۲۳۴۵۶۷۸۹';
+
+/// Latin digits to Persian digits (for counts, times and badges).
+String persianDigits(String s) {
+  if (currentLang != 'fa') return s;
+  return s.replaceAllMapped(RegExp(r'[0-9]'), (m) => _fa[int.parse(m[0]!)]);
+}
+
+/// Numbers formatted for the current language.
+String n(Object v) => persianDigits('$v');
+
+/// Rebuilds every element, so strings that are read through [t] refresh even
+/// inside const widgets.
+void rebuildAll(BuildContext context) {
+  void visit(Element e) {
+    e.markNeedsBuild();
+    e.visitChildren(visit);
+  }
+
+  (context as Element).visitChildren(visit);
+}
+
+const Map<String, Map<String, String>> _tables = {'fa': _persian, 'it': _italian};
+
+const _persian = <String, String>{
+  // general
+  'OK': 'باشه',
+  'Cancel': 'انصراف',
+  'Save': 'ذخیره',
+  'Add': 'افزودن',
+  'Update': 'به‌روزرسانی',
+  'Remove': 'حذف',
+  'Delete': 'حذف',
+  'Leave': 'ترک',
+  'Copy': 'کپی',
+  'Share': 'اشتراک‌گذاری',
+  'Reply': 'پاسخ',
+  'Mute': 'بی‌صدا',
+  'Unmute': 'باصدا',
+  'Accept': 'پذیرفتن',
+  'Decline': 'رد کردن',
+  'Verify': 'تأیید',
+  'Timer': 'زمان‌سنج',
+  'Message': 'پیام',
+  'Messages': 'پیام‌ها',
+  'Chats': 'گفتگوها',
+  'Contacts': 'مخاطبین',
+  'Settings': 'تنظیمات',
+  'Group': 'گروه',
+  'Saved messages': 'پیام‌های ذخیره‌شده',
+  'Today': 'امروز',
+  'Yesterday': 'دیروز',
+  'now': 'اکنون',
+  '{n}m': '{n} دقیقه',
+  '{n}s': '{n} ث',
+  '{n}h': '{n} س',
+  '{n}d': '{n} روز',
+  'Aurora': 'شفق',
+  'Ocean': 'اقیانوس',
+  'Sunset': 'غروب',
+  'Mint': 'نعنایی',
+  'Grape': 'انگوری',
+  // connection
+  'Connecting…': 'در حال اتصال…',
+  'Reconnecting…': 'اتصال دوباره…',
+  'Waiting for network…': 'در انتظار شبکه…',
+  // login / register
+  'Enter your username and password': 'نام کاربری و رمز عبور را وارد کنید',
+  'Welcome back': 'خوش برگشتی',
+  'Sign in to pick up your conversations': 'وارد شوید و گفتگوهایتان را ادامه دهید',
+  'Username or email': 'نام کاربری یا ایمیل',
+  'Password': 'رمز عبور',
+  'Sign in': 'ورود',
+  'New here?': 'تازه‌وارد هستید؟',
+  'Request an account': 'درخواست حساب',
+  'Please fill in every field': 'لطفاً همهٔ فیلدها را پر کنید',
+  'Password must be at least 8 characters': 'رمز عبور باید دست‌کم ۸ کاراکتر باشد',
+  'Passwords do not match': 'رمزهای عبور یکسان نیستند',
+  'Your request was submitted and is waiting for an administrator to approve it.':
+      'درخواست شما ثبت شد و در انتظار تأیید مدیر است.',
+  'Too short': 'خیلی کوتاه',
+  'Weak': 'ضعیف',
+  'Okay': 'متوسط',
+  'Strong': 'قوی',
+  'Excellent': 'عالی',
+  'Request sent': 'درخواست ارسال شد',
+  'Back to sign in': 'بازگشت به ورود',
+  'Create your account': 'حساب خود را بسازید',
+  'An administrator approves new accounts.': 'حساب‌های جدید توسط مدیر تأیید می‌شوند.',
+  'Username': 'نام کاربری',
+  'Email': 'ایمیل',
+  'Confirm password': 'تکرار رمز عبور',
+  'Send request': 'ارسال درخواست',
+  // chat list
+  'Leave this group?': 'از این گروه خارج می‌شوید؟',
+  'Delete this chat?': 'این گفتگو حذف شود؟',
+  'The secret chat is deleted for both of you. This cannot be undone.':
+      'گفتگوی مخفی برای هر دو نفر حذف می‌شود. این کار برگشت‌پذیر نیست.',
+  'You will stop receiving its messages.': 'دیگر پیام‌های آن را دریافت نمی‌کنید.',
+  'It disappears from your list. The other person keeps their copy.':
+      'از فهرست شما حذف می‌شود. نسخهٔ طرف مقابل باقی می‌ماند.',
+  'Leave group': 'خروج از گروه',
+  'Delete chat': 'حذف گفتگو',
+  'Delete secret chat': 'حذف گفتگوی مخفی',
+  'Notifications muted': 'اعلان‌ها بی‌صدا شد',
+  'Notifications on': 'اعلان‌ها روشن شد',
+  'Search chats': 'جستجوی گفتگوها',
+  'No matches': 'نتیجه‌ای یافت نشد',
+  'No conversations yet': 'هنوز گفتگویی ندارید',
+  'Nothing here': 'چیزی اینجا نیست',
+  'Try a different name.': 'نام دیگری را امتحان کنید.',
+  'Start a chat with someone from your contacts.': 'با یکی از مخاطبینتان گفتگو را شروع کنید.',
+  'Start a chat': 'شروع گفتگو',
+  'All': 'همه',
+  'Unread': 'خوانده‌نشده',
+  'Groups': 'گروه‌ها',
+  'Secret': 'مخفی',
+  'Waiting for them to accept…': 'در انتظار پذیرش…',
+  'Wants to start a secret chat': 'می‌خواهد گفتگوی مخفی شروع کند',
+  'Encrypted message': 'پیام رمزنگاری‌شده',
+  'You: ': 'شما: ',
+  'No messages yet': 'هنوز پیامی نیست',
+  'Open chat': 'باز کردن گفتگو',
+  'Mute notifications': 'بی‌صدا کردن اعلان‌ها',
+  'Unmute notifications': 'روشن کردن اعلان‌ها',
+  // new chat
+  'New conversation': 'گفتگوی جدید',
+  'New chat': 'گفتگوی جدید',
+  'Message a contact': 'پیام به یک مخاطب',
+  'Secret chat': 'گفتگوی مخفی',
+  'End-to-end encrypted': 'رمزنگاری سرتاسری',
+  'New secret chat': 'گفتگوی مخفی جدید',
+  'New group': 'گروه جدید',
+  'Chat with many': 'گفتگو با چند نفر',
+  'Add contact': 'افزودن مخاطب',
+  'By username or phone': 'با نام کاربری یا تلفن',
+  'Add a contact': 'افزودن مخاطب',
+  'Username or phone number': 'نام کاربری یا شماره تلفن',
+  '{name} added to contacts': '{name} به مخاطبین اضافه شد',
+  'No contacts yet': 'هنوز مخاطبی ندارید',
+  'Add someone by their username first.': 'ابتدا کسی را با نام کاربری‌اش اضافه کنید.',
+  'Group name': 'نام گروه',
+  'ADD MEMBERS': 'افزودن اعضا',
+  '{n} selected': '{n} انتخاب‌شده',
+  'Add contacts to create a group.': 'برای ساخت گروه، مخاطب اضافه کنید.',
+  'Select members': 'انتخاب اعضا',
+  'Create group': 'ساخت گروه',
+  // contacts
+  'Remove from contacts': 'حذف از مخاطبین',
+  'Remove {name}?': '{name} حذف شود؟',
+  'Your chats with them stay.': 'گفتگوهایتان با او باقی می‌ماند.',
+  'Search contacts': 'جستجوی مخاطبین',
+  'Your circle is empty': 'فهرست شما خالی است',
+  'Add people by username or phone number to start chatting.':
+      'افراد را با نام کاربری یا شماره تلفن اضافه کنید تا گفتگو را شروع کنید.',
+  'Try another name.': 'نام دیگری را امتحان کنید.',
+  // chat
+  'Your encryption key is not on this device. Sign out and back in to unlock this chat.':
+      'کلید رمزنگاری شما روی این دستگاه نیست. برای باز کردن این گفتگو خارج و دوباره وارد شوید.',
+  'Not connected — message not sent': 'اتصال برقرار نیست — پیام ارسال نشد',
+  'Gallery': 'گالری',
+  'Camera': 'دوربین',
+  'File': 'فایل',
+  'Upload failed: {error}': 'بارگذاری ناموفق بود: {error}',
+  'Waiting to be accepted': 'در انتظار پذیرش',
+  '{n} members': '{n} عضو',
+  'Tap for info': 'برای اطلاعات بزنید',
+  'Invitation sent': 'دعوت‌نامه ارسال شد',
+  'Secret chat invitation': 'دعوت به گفتگوی مخفی',
+  'You can message {name} as soon as they accept. Everything here will be end-to-end encrypted.':
+      'به‌محض پذیرش {name} می‌توانید پیام دهید. همه‌چیز در اینجا رمزنگاری سرتاسری می‌شود.',
+  '{name} wants to start an end-to-end encrypted chat. Only the two of you will be able to read it.':
+      '{name} می‌خواهد گفتگوی رمزنگاری‌شده شروع کند. فقط شما دو نفر می‌توانید آن را بخوانید.',
+  'Encrypted on your device': 'رمزنگاری روی دستگاه شما',
+  'Optional self-destruct timer': 'زمان‌سنج خودتخریبی اختیاری',
+  'Verify with a safety number': 'تأیید با شمارهٔ امنیتی',
+  '{names}: no encryption key yet': '{names}: هنوز کلید رمزنگاری ندارد',
+  'Messages in this chat are end-to-end encrypted. Nobody else — not even the server — can read them.':
+      'پیام‌های این گفتگو رمزنگاری سرتاسری دارند. هیچ‌کس دیگر — حتی سرور — نمی‌تواند آن‌ها را بخواند.',
+  'Tap to verify safety number': 'برای تأیید شمارهٔ امنیتی بزنید',
+  'Reply to {name}': 'پاسخ به {name}',
+  'Chat is locked': 'گفتگو قفل است',
+  'Off': 'خاموش',
+  '5 seconds': '۵ ثانیه',
+  '30 seconds': '۳۰ ثانیه',
+  '1 minute': '۱ دقیقه',
+  '1 hour': '۱ ساعت',
+  '1 day': '۱ روز',
+  '1 week': '۱ هفته',
+  'Safety number': 'شمارهٔ امنیتی',
+  'Compare these numbers with the other person in person or on a call. If they match, your chat is private.':
+      'این اعداد را حضوری یا تلفنی با طرف مقابل مقایسه کنید. اگر یکسان باشند، گفتگوی شما خصوصی است.',
+  'Safety number copied': 'شمارهٔ امنیتی کپی شد',
+  // messages
+  '📷 Photo': '📷 عکس',
+  'Say hi and break the ice': 'سلام کنید و گفتگو را شروع کنید',
+  'Unlock secure chat to read this': 'برای خواندن، گفتگوی امن را باز کنید',
+  'Sent to a different key — cannot decrypt': 'با کلید دیگری ارسال شده — رمزگشایی ممکن نیست',
+  'Copied to clipboard': 'کپی شد',
+  'Delete\nfor me': 'حذف\nبرای من',
+  'Delete for\neveryone': 'حذف برای\nهمه',
+  '{ext} · Tap to open': '{ext} · برای باز کردن بزنید',
+  'Download failed: {error}': 'دانلود ناموفق بود: {error}',
+  // chat info
+  'Self-destruct': 'خودتخریبی',
+  'New messages vanish this long after sending': 'پیام‌های جدید پس از این مدت ناپدید می‌شوند',
+  'Add member': 'افزودن عضو',
+  '{name} added': '{name} اضافه شد',
+  'Secret chat · end-to-end encrypted': 'گفتگوی مخفی · رمزنگاری سرتاسری',
+  'Direct message': 'پیام مستقیم',
+  'Members': 'اعضا',
+  '{name} (you)': '{name} (شما)',
+  'Security': 'امنیت',
+  'Messages are encrypted on your device with P-256 + AES-256-GCM.':
+      'پیام‌ها روی دستگاه شما با P-256 و AES-256-GCM رمزنگاری می‌شوند.',
+  // settings
+  'Choose from library': 'انتخاب از گالری',
+  'Take a photo': 'گرفتن عکس',
+  'Remove photo': 'حذف عکس',
+  'Photo removed': 'عکس حذف شد',
+  'Looking good! Photo updated': 'عالی شد! عکس به‌روز شد',
+  'Change username': 'تغییر نام کاربری',
+  'New username': 'نام کاربری جدید',
+  'Username updated': 'نام کاربری به‌روز شد',
+  'Please sign in again with your new username.': 'لطفاً با نام کاربری جدید دوباره وارد شوید.',
+  'Sign in again': 'ورود دوباره',
+  'Appearance': 'ظاهر',
+  'Theme': 'پوسته',
+  'Auto': 'خودکار',
+  'Light': 'روشن',
+  'Dark': 'تیره',
+  'Accent': 'رنگ اصلی',
+  'Language': 'زبان',
+  'Chat wallpaper': 'پس‌زمینهٔ گفتگو',
+  'Soft gradient pattern behind messages': 'طرح گرادیانی ملایم پشت پیام‌ها',
+  'Privacy & security': 'حریم خصوصی و امنیت',
+  'Who sees my photo': 'چه کسی عکسم را می‌بیند',
+  'Everyone': 'همه',
+  'End-to-end encryption': 'رمزنگاری سرتاسری',
+  'Your key is safely stored on this device': 'کلید شما به‌طور امن روی این دستگاه ذخیره شده است',
+  'No key on this device — sign in again': 'کلیدی روی این دستگاه نیست — دوباره وارد شوید',
+  'Account': 'حساب کاربری',
+  'Change password': 'تغییر رمز عبور',
+  'About': 'درباره',
+  'Server': 'سرور',
+  'Sign out': 'خروج',
+  'Sign out?': 'خارج می‌شوید؟',
+  'Your encryption key is removed from this device. Sign in again to read secret chats.':
+      'کلید رمزنگاری از این دستگاه حذف می‌شود. برای خواندن گفتگوهای مخفی دوباره وارد شوید.',
+  'Chatters · made with 💜': 'چترز · ساخته‌شده با 💜',
+  'Encryption ready': 'رمزنگاری آماده است',
+  'Encryption key missing': 'کلید رمزنگاری موجود نیست',
+  'Fill in both fields': 'هر دو فیلد را پر کنید',
+  'At least 8 characters': 'دست‌کم ۸ کاراکتر',
+  'You will be signed out afterwards.': 'پس از آن از حساب خارج می‌شوید.',
+  'Current password': 'رمز عبور فعلی',
+  'New password': 'رمز عبور جدید',
+  'Update password': 'به‌روزرسانی رمز عبور',
+  // services
+  'Attachment': 'پیوست',
+  'Cannot encrypt: no member keys are available.': 'رمزنگاری ممکن نیست: کلید هیچ عضوی موجود نیست.',
+};
+
+const _italian = <String, String>{
+  // general
+  'OK': 'OK',
+  'Cancel': 'Annulla',
+  'Save': 'Salva',
+  'Add': 'Aggiungi',
+  'Update': 'Aggiorna',
+  'Remove': 'Rimuovi',
+  'Delete': 'Elimina',
+  'Leave': 'Esci',
+  'Copy': 'Copia',
+  'Share': 'Condividi',
+  'Reply': 'Rispondi',
+  'Mute': 'Silenzia',
+  'Unmute': 'Riattiva',
+  'Accept': 'Accetta',
+  'Decline': 'Rifiuta',
+  'Verify': 'Verifica',
+  'Timer': 'Timer',
+  'Message': 'Messaggio',
+  'Messages': 'Messaggi',
+  'Chats': 'Chat',
+  'Contacts': 'Contatti',
+  'Settings': 'Impostazioni',
+  'Group': 'Gruppo',
+  'Saved messages': 'Messaggi salvati',
+  'Today': 'Oggi',
+  'Yesterday': 'Ieri',
+  'now': 'ora',
+  '{n}m': '{n} min',
+  '{n}s': '{n}s',
+  '{n}h': '{n}h',
+  '{n}d': '{n}g',
+  'Aurora': 'Aurora',
+  'Ocean': 'Oceano',
+  'Sunset': 'Tramonto',
+  'Mint': 'Menta',
+  'Grape': 'Uva',
+  // connection
+  'Connecting…': 'Connessione…',
+  'Reconnecting…': 'Riconnessione…',
+  'Waiting for network…': 'In attesa della rete…',
+  // login / register
+  'Enter your username and password': 'Inserisci nome utente e password',
+  'Welcome back': 'Bentornato',
+  'Sign in to pick up your conversations': 'Accedi per riprendere le tue conversazioni',
+  'Username or email': 'Nome utente o email',
+  'Password': 'Password',
+  'Sign in': 'Accedi',
+  'New here?': 'Sei nuovo?',
+  'Request an account': 'Richiedi un account',
+  'Please fill in every field': 'Compila tutti i campi',
+  'Password must be at least 8 characters': 'La password deve avere almeno 8 caratteri',
+  'Passwords do not match': 'Le password non coincidono',
+  'Your request was submitted and is waiting for an administrator to approve it.':
+      'La tua richiesta è stata inviata ed è in attesa dell’approvazione di un amministratore.',
+  'Too short': 'Troppo corta',
+  'Weak': 'Debole',
+  'Okay': 'Discreta',
+  'Strong': 'Forte',
+  'Excellent': 'Ottima',
+  'Request sent': 'Richiesta inviata',
+  'Back to sign in': 'Torna all’accesso',
+  'Create your account': 'Crea il tuo account',
+  'An administrator approves new accounts.': 'I nuovi account vengono approvati da un amministratore.',
+  'Username': 'Nome utente',
+  'Email': 'Email',
+  'Confirm password': 'Conferma password',
+  'Send request': 'Invia richiesta',
+  // chat list
+  'Leave this group?': 'Uscire da questo gruppo?',
+  'Delete this chat?': 'Eliminare questa chat?',
+  'The secret chat is deleted for both of you. This cannot be undone.':
+      'La chat segreta verrà eliminata per entrambi. L’azione è irreversibile.',
+  'You will stop receiving its messages.': 'Non riceverai più i suoi messaggi.',
+  'It disappears from your list. The other person keeps their copy.':
+      'Scompare dal tuo elenco. L’altra persona conserva la sua copia.',
+  'Leave group': 'Esci dal gruppo',
+  'Delete chat': 'Elimina chat',
+  'Delete secret chat': 'Elimina chat segreta',
+  'Notifications muted': 'Notifiche silenziate',
+  'Notifications on': 'Notifiche attive',
+  'Search chats': 'Cerca chat',
+  'No matches': 'Nessun risultato',
+  'No conversations yet': 'Ancora nessuna conversazione',
+  'Nothing here': 'Niente da mostrare',
+  'Try a different name.': 'Prova un altro nome.',
+  'Start a chat with someone from your contacts.': 'Inizia una chat con qualcuno dei tuoi contatti.',
+  'Start a chat': 'Inizia una chat',
+  'All': 'Tutte',
+  'Unread': 'Non lette',
+  'Groups': 'Gruppi',
+  'Secret': 'Segrete',
+  'Waiting for them to accept…': 'In attesa che accetti…',
+  'Wants to start a secret chat': 'Vuole iniziare una chat segreta',
+  'Encrypted message': 'Messaggio crittografato',
+  'You: ': 'Tu: ',
+  'No messages yet': 'Ancora nessun messaggio',
+  'Open chat': 'Apri chat',
+  'Mute notifications': 'Silenzia notifiche',
+  'Unmute notifications': 'Riattiva notifiche',
+  // new chat
+  'New conversation': 'Nuova conversazione',
+  'New chat': 'Nuova chat',
+  'Message a contact': 'Scrivi a un contatto',
+  'Secret chat': 'Chat segreta',
+  'End-to-end encrypted': 'Crittografia end-to-end',
+  'New secret chat': 'Nuova chat segreta',
+  'New group': 'Nuovo gruppo',
+  'Chat with many': 'Chatta con più persone',
+  'Add contact': 'Aggiungi contatto',
+  'By username or phone': 'Con nome utente o telefono',
+  'Add a contact': 'Aggiungi un contatto',
+  'Username or phone number': 'Nome utente o numero di telefono',
+  '{name} added to contacts': '{name} aggiunto ai contatti',
+  'No contacts yet': 'Ancora nessun contatto',
+  'Add someone by their username first.': 'Prima aggiungi qualcuno con il suo nome utente.',
+  'Group name': 'Nome del gruppo',
+  'ADD MEMBERS': 'AGGIUNGI MEMBRI',
+  '{n} selected': '{n} selezionati',
+  'Add contacts to create a group.': 'Aggiungi contatti per creare un gruppo.',
+  'Select members': 'Seleziona membri',
+  'Create group': 'Crea gruppo',
+  // contacts
+  'Remove from contacts': 'Rimuovi dai contatti',
+  'Remove {name}?': 'Rimuovere {name}?',
+  'Your chats with them stay.': 'Le vostre chat restano.',
+  'Search contacts': 'Cerca contatti',
+  'Your circle is empty': 'La tua cerchia è vuota',
+  'Add people by username or phone number to start chatting.':
+      'Aggiungi persone con nome utente o numero di telefono per iniziare a chattare.',
+  'Try another name.': 'Prova un altro nome.',
+  // chat
+  'Your encryption key is not on this device. Sign out and back in to unlock this chat.':
+      'La tua chiave di crittografia non è su questo dispositivo. Esci e accedi di nuovo per sbloccare la chat.',
+  'Not connected — message not sent': 'Non connesso — messaggio non inviato',
+  'Gallery': 'Galleria',
+  'Camera': 'Fotocamera',
+  'File': 'File',
+  'Upload failed: {error}': 'Caricamento non riuscito: {error}',
+  'Waiting to be accepted': 'In attesa di accettazione',
+  '{n} members': '{n} membri',
+  'Tap for info': 'Tocca per info',
+  'Invitation sent': 'Invito inviato',
+  'Secret chat invitation': 'Invito a una chat segreta',
+  'You can message {name} as soon as they accept. Everything here will be end-to-end encrypted.':
+      'Potrai scrivere a {name} appena accetta. Qui tutto sarà crittografato end-to-end.',
+  '{name} wants to start an end-to-end encrypted chat. Only the two of you will be able to read it.':
+      '{name} vuole iniziare una chat crittografata end-to-end. Solo voi due potrete leggerla.',
+  'Encrypted on your device': 'Crittografata sul tuo dispositivo',
+  'Optional self-destruct timer': 'Timer di autodistruzione opzionale',
+  'Verify with a safety number': 'Verifica con un codice di sicurezza',
+  '{names}: no encryption key yet': '{names}: ancora nessuna chiave di crittografia',
+  'Messages in this chat are end-to-end encrypted. Nobody else — not even the server — can read them.':
+      'I messaggi di questa chat sono crittografati end-to-end. Nessun altro — nemmeno il server — può leggerli.',
+  'Tap to verify safety number': 'Tocca per verificare il codice di sicurezza',
+  'Reply to {name}': 'Rispondi a {name}',
+  'Chat is locked': 'La chat è bloccata',
+  'Off': 'Disattivato',
+  '5 seconds': '5 secondi',
+  '30 seconds': '30 secondi',
+  '1 minute': '1 minuto',
+  '1 hour': '1 ora',
+  '1 day': '1 giorno',
+  '1 week': '1 settimana',
+  'Safety number': 'Codice di sicurezza',
+  'Compare these numbers with the other person in person or on a call. If they match, your chat is private.':
+      'Confronta questi numeri con l’altra persona, di persona o in chiamata. Se coincidono, la chat è privata.',
+  'Safety number copied': 'Codice di sicurezza copiato',
+  // messages
+  '📷 Photo': '📷 Foto',
+  'Say hi and break the ice': 'Saluta e rompi il ghiaccio',
+  'Unlock secure chat to read this': 'Sblocca la chat sicura per leggerlo',
+  'Sent to a different key — cannot decrypt': 'Inviato a un’altra chiave — impossibile decifrarlo',
+  'Copied to clipboard': 'Copiato negli appunti',
+  'Delete\nfor me': 'Elimina\nper me',
+  'Delete for\neveryone': 'Elimina per\ntutti',
+  '{ext} · Tap to open': '{ext} · Tocca per aprire',
+  'Download failed: {error}': 'Download non riuscito: {error}',
+  // chat info
+  'Self-destruct': 'Autodistruzione',
+  'New messages vanish this long after sending': 'I nuovi messaggi spariscono dopo questo tempo',
+  'Add member': 'Aggiungi membro',
+  '{name} added': '{name} aggiunto',
+  'Secret chat · end-to-end encrypted': 'Chat segreta · crittografia end-to-end',
+  'Direct message': 'Messaggio diretto',
+  'Members': 'Membri',
+  '{name} (you)': '{name} (tu)',
+  'Security': 'Sicurezza',
+  'Messages are encrypted on your device with P-256 + AES-256-GCM.':
+      'I messaggi vengono crittografati sul tuo dispositivo con P-256 + AES-256-GCM.',
+  // settings
+  'Choose from library': 'Scegli dalla libreria',
+  'Take a photo': 'Scatta una foto',
+  'Remove photo': 'Rimuovi foto',
+  'Photo removed': 'Foto rimossa',
+  'Looking good! Photo updated': 'Stai benissimo! Foto aggiornata',
+  'Change username': 'Cambia nome utente',
+  'New username': 'Nuovo nome utente',
+  'Username updated': 'Nome utente aggiornato',
+  'Please sign in again with your new username.': 'Accedi di nuovo con il nuovo nome utente.',
+  'Sign in again': 'Accedi di nuovo',
+  'Appearance': 'Aspetto',
+  'Theme': 'Tema',
+  'Auto': 'Auto',
+  'Light': 'Chiaro',
+  'Dark': 'Scuro',
+  'Accent': 'Colore',
+  'Language': 'Lingua',
+  'Chat wallpaper': 'Sfondo chat',
+  'Soft gradient pattern behind messages': 'Motivo sfumato dietro i messaggi',
+  'Privacy & security': 'Privacy e sicurezza',
+  'Who sees my photo': 'Chi vede la mia foto',
+  'Everyone': 'Tutti',
+  'End-to-end encryption': 'Crittografia end-to-end',
+  'Your key is safely stored on this device': 'La tua chiave è conservata al sicuro su questo dispositivo',
+  'No key on this device — sign in again': 'Nessuna chiave su questo dispositivo — accedi di nuovo',
+  'Account': 'Account',
+  'Change password': 'Cambia password',
+  'About': 'Informazioni',
+  'Server': 'Server',
+  'Sign out': 'Esci',
+  'Sign out?': 'Uscire?',
+  'Your encryption key is removed from this device. Sign in again to read secret chats.':
+      'La chiave di crittografia viene rimossa da questo dispositivo. Accedi di nuovo per leggere le chat segrete.',
+  'Chatters · made with 💜': 'Chatters · fatto con 💜',
+  'Encryption ready': 'Crittografia pronta',
+  'Encryption key missing': 'Chiave di crittografia mancante',
+  'Fill in both fields': 'Compila entrambi i campi',
+  'At least 8 characters': 'Almeno 8 caratteri',
+  'You will be signed out afterwards.': 'Dopo verrai disconnesso.',
+  'Current password': 'Password attuale',
+  'New password': 'Nuova password',
+  'Update password': 'Aggiorna password',
+  // services
+  'Attachment': 'Allegato',
+  'Cannot encrypt: no member keys are available.': 'Impossibile crittografare: nessuna chiave dei membri disponibile.',
+};

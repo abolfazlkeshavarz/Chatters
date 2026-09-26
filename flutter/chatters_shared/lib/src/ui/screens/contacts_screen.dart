@@ -8,6 +8,7 @@ import '../widgets/avatar.dart';
 import '../widgets/common.dart';
 import '../widgets/design.dart';
 import 'new_chat_sheet.dart';
+import '../l10n.dart';
 
 class ContactsScreen extends StatefulWidget {
   const ContactsScreen({super.key});
@@ -34,14 +35,14 @@ class _ContactsScreenState extends State<ContactsScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 20),
               child: Row(children: [
                 Expanded(
-                  child: _QuickAction(Icons.chat_bubble_rounded, 'Message', p.gradient, () {
+                  child: _QuickAction(Icons.chat_bubble_rounded, t('Message'), p.gradient, () {
                     Navigator.pop(c);
                     openDirectChat(context, id);
                   }),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
-                  child: _QuickAction(Icons.lock_rounded, 'Secret chat', p.secureGradient, () {
+                  child: _QuickAction(Icons.lock_rounded, t('Secret chat'), p.secureGradient, () {
                     Navigator.pop(c);
                     openDirectChat(context, id, secret: true);
                   }),
@@ -51,12 +52,12 @@ class _ContactsScreenState extends State<ContactsScreen> {
             const SizedBox(height: 12),
             SettingsTile(
               icon: Icons.person_remove_rounded,
-              title: 'Remove from contacts',
+              title: t('Remove from contacts'),
               destructive: true,
               onTap: () async {
                 Navigator.pop(c);
-                if (await confirm(context, 'Remove $id?', 'Your chats with them stay.',
-                    ok: 'Remove', destructive: true)) {
+                if (await confirm(context, t('Remove {name}?', {'name': id}), t('Your chats with them stay.'),
+                    ok: t('Remove'), destructive: true)) {
                   ContactsStore.instance.remove(id);
                 }
               },
@@ -90,15 +91,15 @@ class _ContactsScreenState extends State<ContactsScreen> {
                   pinned: true,
                   expandedHeight: 116,
                   backgroundColor: p.bg.withValues(alpha: 0.92),
-                  flexibleSpace: const FlexibleSpaceBar(
-                    titlePadding: EdgeInsetsDirectional.only(start: 20, bottom: 14),
-                    title: GradientText('Contacts',
-                        style: TextStyle(fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: -0.6)),
-                    background: AuroraBackground(intensity: 0.45),
+                  flexibleSpace: FlexibleSpaceBar(
+                    titlePadding: const EdgeInsetsDirectional.only(start: 20, bottom: 14),
+                    title: GradientText(t('Contacts'),
+                        style: const TextStyle(fontSize: 28, fontWeight: FontWeight.w800, letterSpacing: -0.6)),
+                    background: const AuroraBackground(intensity: 0.45),
                   ),
                   actions: [
                     Padding(
-                      padding: const EdgeInsets.only(right: 12),
+                      padding: const EdgeInsetsDirectional.only(end: 12),
                       child: IconButton.filled(
                         style: IconButton.styleFrom(backgroundColor: p.primary),
                         icon: const Icon(Icons.person_add_alt_1_rounded, color: Colors.white),
@@ -112,10 +113,10 @@ class _ContactsScreenState extends State<ContactsScreen> {
                     padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
                     child: TextField(
                       onChanged: (v) => setState(() => _query = v.trim()),
-                      decoration: const InputDecoration(
-                        hintText: 'Search contacts',
-                        prefixIcon: Icon(Icons.search_rounded),
-                        contentPadding: EdgeInsets.symmetric(vertical: 12),
+                      decoration: InputDecoration(
+                        hintText: t('Search contacts'),
+                        prefixIcon: const Icon(Icons.search_rounded),
+                        contentPadding: const EdgeInsets.symmetric(vertical: 12),
                       ),
                     ),
                   ),
@@ -127,13 +128,13 @@ class _ContactsScreenState extends State<ContactsScreen> {
                     hasScrollBody: false,
                     child: EmptyState(
                       icon: Icons.people_alt_rounded,
-                      title: all.isEmpty ? 'Your circle is empty' : 'No matches',
-                      message: all.isEmpty ? 'Add people by username or phone number to start chatting.' : 'Try another name.',
+                      title: all.isEmpty ? t('Your circle is empty') : t('No matches'),
+                      message: all.isEmpty ? t('Add people by username or phone number to start chatting.') : t('Try another name.'),
                       action: all.isEmpty
                           ? SizedBox(
                               width: 220,
                               child: GradientButton(
-                                  label: 'Add contact',
+                                  label: t('Add contact'),
                                   icon: Icons.person_add_alt_1_rounded,
                                   onPressed: () => addContactFlow(context)))
                           : null,

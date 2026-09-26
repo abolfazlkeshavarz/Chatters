@@ -11,6 +11,7 @@ import '../widgets/avatar.dart';
 import '../widgets/common.dart';
 import '../widgets/design.dart';
 import 'chat_screen.dart';
+import '../l10n.dart';
 
 const _timers = [0, 5, 30, 60, 3600, 86400, 604800];
 
@@ -71,8 +72,8 @@ class _ChatInfoScreenState extends State<ChatInfoScreen> {
               const SizedBox(width: 12),
               Expanded(
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Self-destruct', style: TextStyle(color: p.text, fontSize: 20, fontWeight: FontWeight.w800)),
-                  Text('New messages vanish this long after sending', style: TextStyle(color: p.subtext, fontSize: 13)),
+                  Text(t('Self-destruct'), style: TextStyle(color: p.text, fontSize: 20, fontWeight: FontWeight.w800)),
+                  Text(t('New messages vanish this long after sending'), style: TextStyle(color: p.subtext, fontSize: 13)),
                 ]),
               ),
             ]),
@@ -105,13 +106,13 @@ class _ChatInfoScreenState extends State<ChatInfoScreen> {
     final secret = chat['is_secret'] == true;
     final ok = await confirm(
       context,
-      group ? 'Leave this group?' : 'Delete this chat?',
+      group ? t('Leave this group?') : t('Delete this chat?'),
       secret
-          ? 'The secret chat is deleted for both of you. This cannot be undone.'
+          ? t('The secret chat is deleted for both of you. This cannot be undone.')
           : group
-              ? 'You will stop receiving its messages.'
-              : 'It disappears from your list. The other person keeps their copy.',
-      ok: group ? 'Leave group' : 'Delete chat',
+              ? t('You will stop receiving its messages.')
+              : t('It disappears from your list. The other person keeps their copy.'),
+      ok: group ? t('Leave group') : t('Delete chat'),
       destructive: true,
     );
     if (!ok) return;
@@ -125,12 +126,12 @@ class _ChatInfoScreenState extends State<ChatInfoScreen> {
   }
 
   Future<void> _addMember() async {
-    final name = await promptText(context, 'Add member', hint: 'Username', ok: 'Add', icon: Icons.person_add_alt_1_rounded);
+    final name = await promptText(context, t('Add member'), hint: t('Username'), ok: t('Add'), icon: Icons.person_add_alt_1_rounded);
     if (name == null || name.trim().isEmpty) return;
     try {
       await addMember(_id, name.trim());
       await _loadMembers();
-      if (mounted) toast(context, '${name.trim()} added');
+      if (mounted) toast(context, t('{name} added', {'name': name.trim()}));
     } catch (e) {
       if (mounted) toast(context, errText(e), error: true);
     }
@@ -173,10 +174,10 @@ class _ChatInfoScreenState extends State<ChatInfoScreen> {
                     const SizedBox(height: 4),
                     Text(
                       isSecret
-                          ? 'Secret chat · end-to-end encrypted'
+                          ? t('Secret chat · end-to-end encrypted')
                           : isGroup
-                              ? '${_members.length} members'
-                              : 'Direct message',
+                              ? t('{n} members', {'n': _members.length})
+                              : t('Direct message'),
                       style: TextStyle(color: isSecret ? p.secure : p.subtext, fontWeight: FontWeight.w600),
                     ),
                   ]),
@@ -187,27 +188,27 @@ class _ChatInfoScreenState extends State<ChatInfoScreen> {
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: Row(children: [
                 _Quick(muted ? Icons.notifications_off_rounded : Icons.notifications_active_rounded,
-                    muted ? 'Unmute' : 'Mute', LinearGradient(colors: [p.warn, const Color(0xfffbbf24)]), _toggleMute),
+                    muted ? t('Unmute') : t('Mute'), LinearGradient(colors: [p.warn, const Color(0xfffbbf24)]), _toggleMute),
                 if (isSecret && !pending)
-                  _Quick(Icons.local_fire_department_rounded, timer > 0 ? timerLabel(timer) : 'Timer',
+                  _Quick(Icons.local_fire_department_rounded, timer > 0 ? timerLabel(timer) : t('Timer'),
                       LinearGradient(colors: [const Color(0xfff97316), p.danger]), _chooseTimer),
                 if (!isGroup && !isSecret && other != null)
-                  _Quick(Icons.lock_rounded, 'Secret chat', p.secureGradient, () {
+                  _Quick(Icons.lock_rounded, t('Secret chat'), p.secureGradient, () {
                     Navigator.of(context).popUntil((r) => r.isFirst);
                     openDirectChat(context, other, secret: true);
                   }),
                 if (host.fingerprint.isNotEmpty)
-                  _Quick(Icons.verified_user_rounded, 'Verify', p.secureGradient,
+                  _Quick(Icons.verified_user_rounded, t('Verify'), p.secureGradient,
                       () => showSafetyNumber(context, host.fingerprint)),
-                if (isGroup) _Quick(Icons.person_add_alt_1_rounded, 'Add', p.gradient, _addMember),
+                if (isGroup) _Quick(Icons.person_add_alt_1_rounded, t('Add'), p.gradient, _addMember),
               ]),
             ),
             if (isGroup)
-              SectionCard(title: 'Members', children: [
+              SectionCard(title: t('Members'), children: [
                 for (final m in _members)
                   ListTile(
                     leading: UserAvatar(userId: m, size: 40),
-                    title: Text(m == _me ? '$m (you)' : m, style: TextStyle(color: p.text, fontWeight: FontWeight.w600)),
+                    title: Text(m == _me ? t('{name} (you)', {'name': m}) : m, style: TextStyle(color: p.text, fontWeight: FontWeight.w600)),
                     trailing: m == _me
                         ? null
                         : IconButton(
@@ -220,16 +221,16 @@ class _ChatInfoScreenState extends State<ChatInfoScreen> {
                   ),
               ]),
             if (isSecret)
-              SectionCard(title: 'Security', children: [
-                const SettingsTile(
+              SectionCard(title: t('Security'), children: [
+                SettingsTile(
                   icon: Icons.enhanced_encryption_rounded,
-                  title: 'End-to-end encrypted',
-                  subtitle: 'Messages are encrypted on your device with P-256 + AES-256-GCM.',
+                  title: t('End-to-end encrypted'),
+                  subtitle: t('Messages are encrypted on your device with P-256 + AES-256-GCM.'),
                 ),
                 if (host.fingerprint.isNotEmpty)
                   SettingsTile(
                     icon: Icons.pin_rounded,
-                    title: 'Safety number',
+                    title: t('Safety number'),
                     subtitle: host.fingerprint,
                     gradient: p.secureGradient,
                     onTap: () => showSafetyNumber(context, host.fingerprint),
@@ -238,7 +239,7 @@ class _ChatInfoScreenState extends State<ChatInfoScreen> {
             SectionCard(children: [
               SettingsTile(
                 icon: isGroup ? Icons.logout_rounded : Icons.delete_rounded,
-                title: isGroup ? 'Leave group' : (isSecret ? 'Delete secret chat' : 'Delete chat'),
+                title: isGroup ? t('Leave group') : (isSecret ? t('Delete secret chat') : t('Delete chat')),
                 destructive: true,
                 onTap: _delete,
               ),

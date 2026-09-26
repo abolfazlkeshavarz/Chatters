@@ -7,6 +7,7 @@ import '../theme.dart';
 import '../widgets/avatar.dart';
 import '../widgets/common.dart';
 import '../widgets/design.dart';
+import '../l10n.dart';
 
 void showNewChatSheet(BuildContext context) {
   ContactsStore.instance.load();
@@ -17,7 +18,7 @@ void showNewChatSheet(BuildContext context) {
       child: Padding(
         padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
         child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-          Text('New conversation', style: TextStyle(color: p.text, fontSize: 22, fontWeight: FontWeight.w800)),
+          Text(t('New conversation'), style: TextStyle(color: p.text, fontSize: 22, fontWeight: FontWeight.w800)),
           const SizedBox(height: 16),
           GridView.count(
             shrinkWrap: true,
@@ -27,21 +28,21 @@ void showNewChatSheet(BuildContext context) {
             childAspectRatio: 1.35,
             physics: const NeverScrollableScrollPhysics(),
             children: [
-              _ActionCard(Icons.chat_bubble_rounded, 'New chat', 'Message a contact', p.gradient, () {
+              _ActionCard(Icons.chat_bubble_rounded, t('New chat'), t('Message a contact'), p.gradient, () {
                 Navigator.pop(c);
-                pickContact(context, title: 'New chat', onPick: (id) => openDirectChat(context, id));
+                pickContact(context, title: t('New chat'), onPick: (id) => openDirectChat(context, id));
               }),
-              _ActionCard(Icons.lock_rounded, 'Secret chat', 'End-to-end encrypted', p.secureGradient, () {
+              _ActionCard(Icons.lock_rounded, t('Secret chat'), t('End-to-end encrypted'), p.secureGradient, () {
                 Navigator.pop(c);
                 pickContact(context,
-                    title: 'New secret chat', onPick: (id) => openDirectChat(context, id, secret: true));
+                    title: t('New secret chat'), onPick: (id) => openDirectChat(context, id, secret: true));
               }),
-              _ActionCard(Icons.groups_rounded, 'New group', 'Chat with many',
+              _ActionCard(Icons.groups_rounded, t('New group'), t('Chat with many'),
                   const LinearGradient(colors: [Color(0xfff97316), Color(0xffe11d48)]), () {
                 Navigator.pop(c);
                 Navigator.push(context, MaterialPageRoute(builder: (_) => const NewGroupScreen()));
               }),
-              _ActionCard(Icons.person_add_alt_1_rounded, 'Add contact', 'By username or phone',
+              _ActionCard(Icons.person_add_alt_1_rounded, t('Add contact'), t('By username or phone'),
                   const LinearGradient(colors: [Color(0xff2563eb), Color(0xff06b6d4)]), () {
                 Navigator.pop(c);
                 addContactFlow(context);
@@ -80,12 +81,12 @@ class _ActionCard extends StatelessWidget {
 }
 
 Future<void> addContactFlow(BuildContext context) async {
-  final name = await promptText(context, 'Add a contact',
-      hint: 'Username or phone number', ok: 'Add contact', icon: Icons.person_search_rounded);
+  final name = await promptText(context, t('Add a contact'),
+      hint: t('Username or phone number'), ok: t('Add contact'), icon: Icons.person_search_rounded);
   if (name == null || name.trim().isEmpty) return;
   try {
     await ContactsStore.instance.add(name.trim());
-    if (context.mounted) toast(context, '${name.trim()} added to contacts');
+    if (context.mounted) toast(context, t('{name} added to contacts', {'name': name.trim()}));
   } catch (e) {
     if (context.mounted) toast(context, errText(e), error: true);
   }
@@ -119,10 +120,10 @@ void pickContact(BuildContext context, {required String title, required void Fun
               child: contacts.isEmpty
                   ? EmptyState(
                       icon: Icons.people_alt_rounded,
-                      title: 'No contacts yet',
-                      message: 'Add someone by their username first.',
+                      title: t('No contacts yet'),
+                      message: t('Add someone by their username first.'),
                       action: SizedBox(
-                          width: 200, child: GradientButton(label: 'Add contact', onPressed: () => addContactFlow(context))),
+                          width: 200, child: GradientButton(label: t('Add contact'), onPressed: () => addContactFlow(context))),
                     )
                   : ListView.builder(
                       controller: scroll,
@@ -184,7 +185,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
     final p = context.p;
     final contacts = ContactsStore.instance.contacts;
     return Scaffold(
-      appBar: AppBar(title: const Text('New group')),
+      appBar: AppBar(title: Text(t('New group'))),
       body: Column(children: [
         Padding(
           padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -204,7 +205,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
               child: TextField(
                 controller: _name,
                 onChanged: (_) => setState(() {}),
-                decoration: const InputDecoration(hintText: 'Group name'),
+                decoration: InputDecoration(hintText: t('Group name')),
               ),
             ),
           ]),
@@ -221,7 +222,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
                     children: [
                       for (final id in _selected)
                         Padding(
-                          padding: const EdgeInsets.only(right: 6),
+                          padding: const EdgeInsetsDirectional.only(end: 6),
                           child: InputChip(
                             avatar: UserAvatar(userId: id, size: 24),
                             label: Text(id),
@@ -235,15 +236,15 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
         Padding(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 4),
           child: Row(children: [
-            Text('ADD MEMBERS', style: TextStyle(color: p.subtext, fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 1.1)),
+            Text(t('ADD MEMBERS'), style: TextStyle(color: p.subtext, fontSize: 12, fontWeight: FontWeight.w700, letterSpacing: 1.1)),
             const Spacer(),
-            Text('${_selected.length} selected', style: TextStyle(color: p.primary, fontWeight: FontWeight.w600)),
+            Text(t('{n} selected', {'n': _selected.length}), style: TextStyle(color: p.primary, fontWeight: FontWeight.w600)),
           ]),
         ),
         Expanded(
           child: contacts.isEmpty
-              ? const EmptyState(
-                  icon: Icons.people_alt_rounded, title: 'No contacts yet', message: 'Add contacts to create a group.')
+              ? EmptyState(
+                  icon: Icons.people_alt_rounded, title: t('No contacts yet'), message: t('Add contacts to create a group.'))
               : ListView.builder(
                   itemCount: contacts.length,
                   itemBuilder: (_, i) {
@@ -272,7 +273,7 @@ class _NewGroupScreenState extends State<NewGroupScreen> {
         SafeArea(
           minimum: const EdgeInsets.all(16),
           child: GradientButton(
-            label: _selected.isEmpty ? 'Select members' : 'Create group',
+            label: _selected.isEmpty ? t('Select members') : t('Create group'),
             icon: Icons.check_rounded,
             busy: _busy,
             onPressed: _selected.isEmpty ? null : _create,

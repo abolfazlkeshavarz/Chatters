@@ -10,6 +10,8 @@ import '../theme.dart';
 import '../widgets/avatar.dart';
 import '../widgets/common.dart';
 import '../widgets/design.dart';
+import '../widgets/language_picker.dart';
+import '../l10n.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -47,14 +49,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
       context: context,
       builder: (c) => SafeArea(
         child: Column(mainAxisSize: MainAxisSize.min, children: [
-          SettingsTile(icon: Icons.photo_library_rounded, title: 'Choose from library', onTap: () => Navigator.pop(c, 'gallery')),
+          SettingsTile(icon: Icons.photo_library_rounded, title: t('Choose from library'), onTap: () => Navigator.pop(c, 'gallery')),
           SettingsTile(
               icon: Icons.photo_camera_rounded,
-              title: 'Take a photo',
+              title: t('Take a photo'),
               gradient: const LinearGradient(colors: [Color(0xff2563eb), Color(0xff06b6d4)]),
               onTap: () => Navigator.pop(c, 'camera')),
           if (_hasAvatar)
-            SettingsTile(icon: Icons.delete_rounded, title: 'Remove photo', destructive: true, onTap: () => Navigator.pop(c, 'remove')),
+            SettingsTile(icon: Icons.delete_rounded, title: t('Remove photo'), destructive: true, onTap: () => Navigator.pop(c, 'remove')),
           const SizedBox(height: 8),
         ]),
       ),
@@ -73,7 +75,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _hasAvatar = true;
       }
       _bust++;
-      if (mounted) toast(context, choice == 'remove' ? 'Photo removed' : 'Looking good! Photo updated');
+      if (mounted) toast(context, choice == 'remove' ? t('Photo removed') : t('Looking good! Photo updated'));
     } catch (e) {
       if (mounted) toast(context, errText(e), error: true);
     } finally {
@@ -93,14 +95,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _changeUsername() async {
-    final name = await promptText(context, 'Change username',
-        hint: 'New username', ok: 'Update', icon: Icons.alternate_email_rounded);
+    final name = await promptText(context, t('Change username'),
+        hint: t('New username'), ok: t('Update'), icon: Icons.alternate_email_rounded);
     if (name == null || name.trim().isEmpty) return;
     try {
       await changeUsername(name.trim());
       if (!mounted) return;
-      await confirm(context, 'Username updated', 'Please sign in again with your new username.',
-          ok: 'Sign in again', icon: Icons.check_rounded);
+      await confirm(context, t('Username updated'), t('Please sign in again with your new username.'),
+          ok: t('Sign in again'), icon: Icons.check_rounded);
       await Auth.instance.logout();
     } catch (e) {
       if (mounted) toast(context, errText(e), error: true);
@@ -127,17 +129,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
           physics: const BouncingScrollPhysics(),
           children: [
             _header(p),
-            SectionCard(title: 'Appearance', children: [
+            SectionCard(title: t('Language'), children: const [
+              Padding(padding: EdgeInsets.all(14), child: LanguageGrid()),
+            ]),
+            SectionCard(title: t('Appearance'), children: [
               Padding(
                 padding: const EdgeInsets.all(14),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('Theme', style: TextStyle(color: p.text, fontWeight: FontWeight.w600)),
+                  Text(t('Theme'), style: TextStyle(color: p.text, fontWeight: FontWeight.w600)),
                   const SizedBox(height: 10),
                   Row(children: [
                     for (final (m, icon, label) in [
-                      (ThemeMode.system, Icons.brightness_auto_rounded, 'Auto'),
-                      (ThemeMode.light, Icons.light_mode_rounded, 'Light'),
-                      (ThemeMode.dark, Icons.dark_mode_rounded, 'Dark'),
+                      (ThemeMode.system, Icons.brightness_auto_rounded, t('Auto')),
+                      (ThemeMode.light, Icons.light_mode_rounded, t('Light')),
+                      (ThemeMode.dark, Icons.dark_mode_rounded, t('Dark')),
                     ])
                       Expanded(
                         child: Padding(
@@ -168,9 +173,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   ]),
                   const SizedBox(height: 18),
                   Row(children: [
-                    Text('Accent', style: TextStyle(color: p.text, fontWeight: FontWeight.w600)),
+                    Text(t('Accent'), style: TextStyle(color: p.text, fontWeight: FontWeight.w600)),
                     const Spacer(),
-                    Text(_s.accent.name, style: TextStyle(color: p.primary, fontWeight: FontWeight.w700)),
+                    Text(t(_s.accent.name), style: TextStyle(color: p.primary, fontWeight: FontWeight.w700)),
                   ]),
                   const SizedBox(height: 12),
                   Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
@@ -202,28 +207,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               SettingsTile(
                 icon: Icons.wallpaper_rounded,
-                title: 'Chat wallpaper',
-                subtitle: 'Soft gradient pattern behind messages',
+                title: t('Chat wallpaper'),
+                subtitle: t('Soft gradient pattern behind messages'),
                 trailing: Switch(value: _s.wallpaper, onChanged: _s.setWallpaper),
               ),
             ]),
-            SectionCard(title: 'Privacy & security', children: [
+            SectionCard(title: t('Privacy & security'), children: [
               Padding(
                 padding: const EdgeInsets.all(14),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Row(children: [
                     const GradientIcon(Icons.visibility_rounded, size: 36),
                     const SizedBox(width: 14),
-                    Text('Who sees my photo', style: TextStyle(color: p.text, fontWeight: FontWeight.w600, fontSize: 15.5)),
+                    Text(t('Who sees my photo'), style: TextStyle(color: p.text, fontWeight: FontWeight.w600, fontSize: 15.5)),
                   ]),
                   const SizedBox(height: 12),
                   SizedBox(
                     width: double.infinity,
                     child: SegmentedButton<String>(
                       showSelectedIcon: false,
-                      segments: const [
-                        ButtonSegment(value: 'public', label: Text('Everyone'), icon: Icon(Icons.public_rounded)),
-                        ButtonSegment(value: 'contacts', label: Text('Contacts'), icon: Icon(Icons.people_rounded)),
+                      segments: [
+                        ButtonSegment(value: 'public', label: Text(t('Everyone')), icon: const Icon(Icons.public_rounded)),
+                        ButtonSegment(value: 'contacts', label: Text(t('Contacts')), icon: const Icon(Icons.people_rounded)),
                       ],
                       selected: {_visibility},
                       onSelectionChanged: (s) => _setVisibility(s.first),
@@ -233,42 +238,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
               SettingsTile(
                 icon: _hasKey ? Icons.verified_user_rounded : Icons.gpp_maybe_rounded,
-                title: 'End-to-end encryption',
-                subtitle: _hasKey ? 'Your key is safely stored on this device' : 'No key on this device — sign in again',
+                title: t('End-to-end encryption'),
+                subtitle: _hasKey ? t('Your key is safely stored on this device') : t('No key on this device — sign in again'),
                 gradient: _hasKey ? p.secureGradient : LinearGradient(colors: [p.warn, const Color(0xfffbbf24)]),
               ),
             ]),
-            SectionCard(title: 'Account', children: [
-              SettingsTile(icon: Icons.alternate_email_rounded, title: 'Change username', onTap: _changeUsername),
+            SectionCard(title: t('Account'), children: [
+              SettingsTile(icon: Icons.alternate_email_rounded, title: t('Change username'), onTap: _changeUsername),
               SettingsTile(
                 icon: Icons.key_rounded,
-                title: 'Change password',
+                title: t('Change password'),
                 gradient: const LinearGradient(colors: [Color(0xfff97316), Color(0xffe11d48)]),
                 onTap: _changePassword,
               ),
             ]),
-            SectionCard(title: 'About', children: [
+            SectionCard(title: t('About'), children: [
               SettingsTile(
                 icon: Icons.dns_rounded,
-                title: 'Server',
+                title: t('Server'),
                 subtitle: apiBase.replaceFirst(RegExp(r'^https?://'), ''),
                 gradient: const LinearGradient(colors: [Color(0xff2563eb), Color(0xff06b6d4)]),
               ),
               SettingsTile(
                 icon: Icons.logout_rounded,
-                title: 'Sign out',
+                title: t('Sign out'),
                 destructive: true,
                 onTap: () async {
-                  if (await confirm(context, 'Sign out?',
-                      'Your encryption key is removed from this device. Sign in again to read secret chats.',
-                      ok: 'Sign out', destructive: true, icon: Icons.logout_rounded)) {
+                  if (await confirm(context, t('Sign out?'),
+                      t('Your encryption key is removed from this device. Sign in again to read secret chats.'),
+                      ok: t('Sign out'), destructive: true, icon: Icons.logout_rounded)) {
                     await Auth.instance.logout();
                   }
                 },
               ),
             ]),
             const SizedBox(height: 24),
-            Center(child: Text('Chatters · made with 💜', style: TextStyle(color: p.subtext, fontSize: 12))),
+            Center(child: Text(t('Chatters · made with 💜'), style: TextStyle(color: p.subtext, fontSize: 12))),
           ],
         ),
       ),
@@ -331,7 +336,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 Icon(_hasKey ? Icons.lock_rounded : Icons.lock_open_rounded,
                     size: 14, color: _hasKey ? p.secure : p.warn),
                 const SizedBox(width: 6),
-                Text(_hasKey ? 'Encryption ready' : 'Encryption key missing',
+                Text(_hasKey ? t('Encryption ready') : t('Encryption key missing'),
                     style: TextStyle(color: _hasKey ? p.secure : p.warn, fontWeight: FontWeight.w700, fontSize: 12.5)),
               ]),
             ),
@@ -356,8 +361,8 @@ class _PasswordSheetState extends State<_PasswordSheet> {
   String _error = '';
 
   Future<void> _save() async {
-    if (_old.text.isEmpty || _new.text.isEmpty) return setState(() => _error = 'Fill in both fields');
-    if (_new.text.length < 8) return setState(() => _error = 'At least 8 characters');
+    if (_old.text.isEmpty || _new.text.isEmpty) return setState(() => _error = t('Fill in both fields'));
+    if (_new.text.length < 8) return setState(() => _error = t('At least 8 characters'));
     setState(() {
       _busy = true;
       _error = '';
@@ -383,23 +388,23 @@ class _PasswordSheetState extends State<_PasswordSheet> {
     return Padding(
       padding: EdgeInsets.fromLTRB(24, 0, 24, MediaQuery.of(context).viewInsets.bottom + 24),
       child: Column(mainAxisSize: MainAxisSize.min, crossAxisAlignment: CrossAxisAlignment.stretch, children: [
-        Text('Change password', style: TextStyle(color: p.text, fontSize: 20, fontWeight: FontWeight.w800)),
+        Text(t('Change password'), style: TextStyle(color: p.text, fontSize: 20, fontWeight: FontWeight.w800)),
         const SizedBox(height: 4),
-        Text('You will be signed out afterwards.', style: TextStyle(color: p.subtext)),
+        Text(t('You will be signed out afterwards.'), style: TextStyle(color: p.subtext)),
         const SizedBox(height: 16),
         TextField(
             controller: _old,
             obscureText: true,
-            decoration: const InputDecoration(hintText: 'Current password', prefixIcon: Icon(Icons.lock_outline_rounded))),
+            decoration: InputDecoration(hintText: t('Current password'), prefixIcon: const Icon(Icons.lock_outline_rounded))),
         const SizedBox(height: 12),
         TextField(
             controller: _new,
             obscureText: true,
             onSubmitted: (_) => _save(),
-            decoration: const InputDecoration(hintText: 'New password', prefixIcon: Icon(Icons.key_rounded))),
+            decoration: InputDecoration(hintText: t('New password'), prefixIcon: const Icon(Icons.key_rounded))),
         if (_error.isNotEmpty) Padding(padding: const EdgeInsets.only(top: 10), child: Text(_error, style: TextStyle(color: p.danger))),
         const SizedBox(height: 16),
-        GradientButton(label: 'Update password', busy: _busy, onPressed: _save),
+        GradientButton(label: t('Update password'), busy: _busy, onPressed: _save),
       ]),
     );
   }

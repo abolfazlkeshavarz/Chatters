@@ -7,6 +7,7 @@ import '../api/endpoints.dart';
 import '../crypto/e2ee.dart';
 import '../storage.dart';
 import 'chat_socket.dart';
+import '../ui/l10n.dart';
 
 const _statusOrder = {'sent': 0, 'delivered': 1, 'seen': 2};
 
@@ -148,7 +149,7 @@ class ChatController extends ChangeNotifier {
     }
     final people = recipients;
     if (people == null || people.isEmpty) {
-      error = 'Cannot encrypt: no member keys are available.';
+      error = t('Cannot encrypt: no member keys are available.');
       notifyListeners();
       return false;
     }
