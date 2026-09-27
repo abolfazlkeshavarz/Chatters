@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { memo, useCallback, useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -43,6 +43,83 @@ export function chatTitle(chat, me) {
   if (chat.is_group) return chat.name || others.join(", ") || "Group";
   return others[0] || "Saved messages";
 }
+
+const ChatRow = memo(function ChatRow({ chat, me, theme, onPress, onLongPress }) {
+  const title = chatTitle(chat, me);
+  const unread = chat.unread_count > 0;
+  let preview;
+  if (chat.last_is_encrypted) preview = "🔒 Encrypted message";
+  else if (chat.last_message) {
+    const prefix =
+      chat.last_message_sender === me
+        ? "You: "
+        : chat.is_group && chat.last_message_sender
+        ? `${chat.last_message_sender}: `
+        : "";
+    preview = prefix + chat.last_message;
+  } else preview = "No messages yet";
+
+  if (chat.last_is_system && chat.last_message) preview = chat.last_message;
+
+  return (
+    <Pressable
+      onPress={() => onPress(chat)}
+      onLongPress={() => onLongPress(chat)}
+      style={[
+        styles.card,
+        { backgroundColor: unread ? theme.unreadBg : theme.card, borderColor: theme.border },
+      ]}
+    >
+      {chat.is_group ? (
+        <View style={[styles.groupAvatar, { backgroundColor: theme.primary }]}>
+          <Text style={styles.groupAvatarText}>{title[0]?.toUpperCase() || "?"}</Text>
+        </View>
+      ) : (
+        <Avatar userId={title} size={46} />
+      )}
+
+      <View style={styles.cardBody}>
+        <View style={styles.cardTop}>
+          <Text numberOfLines={1} style={[styles.cardTitle, { color: theme.text }]}>
+            {chat.e2e_enabled || chat.is_secret ? "🔒 " : ""}
+            {title}
+            {chat.is_secret ? "  ·  secret" : chat.is_group ? "  ·  group" : ""}
+            {chat.self_destruct_seconds > 0 ? "  🔥" : ""}
+            {chat.muted ? "  🔕" : ""}
+          </Text>
+          <Text style={[styles.time, { color: theme.subtext }]}>
+            {formatTime(chat.last_message_time)}
+          </Text>
+        </View>
+        {chat.is_secret && chat.e2e_status === "pending" && (
+          <Text style={[styles.pending, { color: theme.secure }]}>
+            {chat.e2e_requested_by === me
+              ? "🔒 Waiting for them to accept…"
+              : "🔒 Wants to start a secret chat — tap to respond"}
+          </Text>
+        )}
+        <View style={styles.cardBottom}>
+          <Text
+            numberOfLines={1}
+            style={[
+              styles.preview,
+              { color: unread ? theme.text : theme.subtext, fontWeight: unread ? "600" : "400" },
+            ]}
+          >
+            {preview}
+          </Text>
+          {unread && (
+            <View style={[styles.badge, { backgroundColor: theme.primary }]}>
+              <Text style={styles.badgeText}>
+                {chat.unread_count > 9 ? "9+" : chat.unread_count}
+              </Text>
+            </View>
+          )}
+        </View>
+      </View>
+    </Pressable>
+  );
+});
 
 export default function ChatListScreen({ navigation }) {
   const theme = useTheme();
@@ -132,109 +209,53 @@ export default function ChatListScreen({ navigation }) {
     }
   }
 
-  function confirmDeleteChat(chat) {
-    const scope = chat.is_secret ? "everyone" : "me";
-    Alert.alert(
-      chat.is_group ? "Leave group?" : "Delete chat?",
-      chat.is_secret
-        ? "This deletes the secret chat for both of you. Cannot be undone."
-        : chat.is_group
-        ? "You will stop receiving its messages."
-        : "Removes it from your list. The other person keeps their copy.",
-      [
-        { text: "Cancel", style: "cancel" },
-        {
-          text: chat.is_group ? "Leave" : "Delete",
-          style: "destructive",
-          onPress: async () => {
-            setChats((prev) => prev.filter((c) => c.id !== chat.id));
-            try {
-              await deleteChat(chat.id, scope);
-            } catch {
-              load();
-            }
+  const confirmDeleteChat = useCallback(
+    (chat) => {
+      const scope = chat.is_secret ? "everyone" : "me";
+      Alert.alert(
+        chat.is_group ? "Leave group?" : "Delete chat?",
+        chat.is_secret
+          ? "This deletes the secret chat for both of you. Cannot be undone."
+          : chat.is_group
+          ? "You will stop receiving its messages."
+          : "Removes it from your list. The other person keeps their copy.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: chat.is_group ? "Leave" : "Delete",
+            style: "destructive",
+            onPress: async () => {
+              setChats((prev) => prev.filter((c) => c.id !== chat.id));
+              try {
+                await deleteChat(chat.id, scope);
+              } catch {
+                load();
+              }
+            },
           },
-        },
-      ]
-    );
-  }
+        ]
+      );
+    },
+    [load]
+  );
 
-  function renderChat({ item: chat }) {
-    const title = chatTitle(chat, me);
-    const unread = chat.unread_count > 0;
-    let preview;
-    if (chat.last_is_encrypted) preview = "🔒 Encrypted message";
-    else if (chat.last_message) {
-      const prefix =
-        chat.last_message_sender === me
-          ? "You: "
-          : chat.is_group && chat.last_message_sender
-          ? `${chat.last_message_sender}: `
-          : "";
-      preview = prefix + chat.last_message;
-    } else preview = "No messages yet";
+  const openChat = useCallback((chat) => navigation.navigate("Chat", { chat }), [navigation]);
 
-    if (chat.last_is_system && chat.last_message) preview = chat.last_message;
-
-    return (
-      <Pressable
-        onPress={() => navigation.navigate("Chat", { chat })}
-        onLongPress={() => confirmDeleteChat(chat)}
-        style={[
-          styles.card,
-          { backgroundColor: unread ? theme.unreadBg : theme.card, borderColor: theme.border },
-        ]}
-      >
-        {chat.is_group ? (
-          <View style={[styles.groupAvatar, { backgroundColor: theme.primary }]}>
-            <Text style={styles.groupAvatarText}>{title[0]?.toUpperCase() || "?"}</Text>
-          </View>
-        ) : (
-          <Avatar userId={title} size={46} />
-        )}
-
-        <View style={styles.cardBody}>
-          <View style={styles.cardTop}>
-            <Text numberOfLines={1} style={[styles.cardTitle, { color: theme.text }]}>
-              {chat.e2e_enabled || chat.is_secret ? "🔒 " : ""}
-              {title}
-              {chat.is_secret ? "  ·  secret" : chat.is_group ? "  ·  group" : ""}
-              {chat.self_destruct_seconds > 0 ? "  🔥" : ""}
-              {chat.muted ? "  🔕" : ""}
-            </Text>
-            <Text style={[styles.time, { color: theme.subtext }]}>
-              {formatTime(chat.last_message_time)}
-            </Text>
-          </View>
-          {chat.is_secret && chat.e2e_status === "pending" && (
-            <Text style={[styles.pending, { color: theme.secure }]}>
-              {chat.e2e_requested_by === me
-                ? "🔒 Waiting for them to accept…"
-                : "🔒 Wants to start a secret chat — tap to respond"}
-            </Text>
-          )}
-          <View style={styles.cardBottom}>
-            <Text
-              numberOfLines={1}
-              style={[
-                styles.preview,
-                { color: unread ? theme.text : theme.subtext, fontWeight: unread ? "600" : "400" },
-              ]}
-            >
-              {preview}
-            </Text>
-            {unread && (
-              <View style={[styles.badge, { backgroundColor: theme.primary }]}>
-                <Text style={styles.badgeText}>
-                  {chat.unread_count > 9 ? "9+" : chat.unread_count}
-                </Text>
-              </View>
-            )}
-          </View>
-        </View>
-      </Pressable>
-    );
-  }
+  // Memoized so that an unrelated screen state change (opening the compose
+  // menu, a refresh finishing) does not re-render every row in the list —
+  // only the ones whose own chat object actually changed.
+  const renderChat = useCallback(
+    ({ item: chat }) => (
+      <ChatRow
+        chat={chat}
+        me={me}
+        theme={theme}
+        onPress={openChat}
+        onLongPress={confirmDeleteChat}
+      />
+    ),
+    [me, theme, openChat, confirmDeleteChat]
+  );
 
   return (
     <Screen edges={["top"]}>
@@ -267,6 +288,10 @@ export default function ChatListScreen({ navigation }) {
           data={chats}
           keyExtractor={(c) => c.id}
           renderItem={renderChat}
+          windowSize={9}
+          maxToRenderPerBatch={10}
+          initialNumToRender={16}
+          removeClippedSubviews
           contentContainerStyle={styles.list}
           refreshControl={
             <RefreshControl refreshing={refreshing} onRefresh={onRefresh} tintColor={theme.primary} />

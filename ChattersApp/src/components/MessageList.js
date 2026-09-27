@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlatList, Pressable, StyleSheet, Text, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
 
@@ -46,7 +46,215 @@ function countdownLabel(expiresAt, now) {
   return `${Math.ceil(secs / 86400)}d`;
 }
 
+function outgoingBubble(theme, status) {
+  if (status === "seen") {
+    return { backgroundColor: theme.success, color: "#fff", borderColor: "transparent" };
+  }
+  if (status === "delivered") {
+    return {
+      backgroundColor: theme.primary,
+      color: theme.primaryContrast,
+      borderColor: "transparent",
+    };
+  }
+  return {
+    backgroundColor: theme.bubbleSent,
+    color: theme.bubbleSentText,
+    borderColor: theme.bubbleSentBorder,
+  };
+}
+
 const STATUS_LABEL = { sent: "Sent", delivered: "Delivered", seen: "Read" };
+
+/**
+ * Ticks its own countdown independently of every other row, and reports back
+ * once, the moment it hits zero. Keeping this local — rather than one clock
+ * in the parent driving every row's re-render every second — is what keeps a
+ * self-destructing chat from redrawing the whole visible list every tick.
+ */
+function useCountdown(expiresAt, onExpire) {
+  const [label, setLabel] = useState(() =>
+    expiresAt ? countdownLabel(expiresAt, Date.now()) : null
+  );
+  const onExpireRef = useRef(onExpire);
+  onExpireRef.current = onExpire;
+
+  useEffect(() => {
+    if (!expiresAt) return undefined;
+    const tick = () => {
+      const next = countdownLabel(expiresAt, Date.now());
+      setLabel(next);
+      if (!next) onExpireRef.current();
+    };
+    tick();
+    const id = setInterval(tick, 1000);
+    return () => clearInterval(id);
+  }, [expiresAt]);
+
+  return label;
+}
+
+/**
+ * One row. Memoized so that opening another message's action menu, or a
+ * neighbour's self-destruct timer ticking, never re-renders bubbles whose own
+ * props did not change — the default behaviour would otherwise redraw every
+ * visible row on any of those, which is what made scrolling and long-pressing
+ * feel heavy compared to a native chat app.
+ */
+const Bubble = memo(function Bubble({
+  message: m,
+  mine,
+  me,
+  secure,
+  held,
+  theme,
+  getReplied,
+  onHold,
+  onUnhold,
+  onReply,
+  onDelete,
+  onPreview,
+  onExpire,
+}) {
+  const countdown = useCountdown(m.expires_at, onExpire);
+
+  if (isSystem(m)) {
+    return (
+      <View style={styles.systemRow}>
+        <Text
+          style={[
+            styles.systemPill,
+            { color: theme.subtext, backgroundColor: theme.bubbleIn },
+          ]}
+        >
+          {m.content}
+        </Text>
+      </View>
+    );
+  }
+
+  const replied = m.reply_to ? getReplied(m.reply_to) : null;
+  const canDeleteEveryone = mine || secure;
+  const palette = mine
+    ? outgoingBubble(theme, m.status)
+    : { backgroundColor: theme.bubbleIn, color: theme.bubbleInText, borderColor: "transparent" };
+
+  function renderBody() {
+    if (m.decryptError === "locked") {
+      return (
+        <Text style={[styles.systemNote, { color: palette.color }]}>
+          🔒 Unlock secure chat to read this message
+        </Text>
+      );
+    }
+    if (m.decryptError === "failed") {
+      return (
+        <Text style={[styles.systemNote, { color: palette.color }]}>
+          🔒 Cannot decrypt — this message was sent to a different key
+        </Text>
+      );
+    }
+
+    if (isMedia(m)) {
+      const label = m.filename || m.content || "attachment";
+      if (isImage(m)) {
+        return (
+          <Pressable onPress={() => onPreview(m)}>
+            <Text style={styles.mediaIcon}>🖼️</Text>
+            <Text style={[styles.mediaLabel, { color: palette.color }]}>{label}</Text>
+            <Text style={[styles.mediaHint, { color: palette.color }]}>Tap to view</Text>
+          </Pressable>
+        );
+      }
+      return (
+        <Pressable onPress={() => onPreview(m)}>
+          <Text style={[styles.text, { color: palette.color }]}>📎 {label}</Text>
+        </Pressable>
+      );
+    }
+
+    return <Text style={[styles.text, { color: palette.color }]}>{m.content}</Text>;
+  }
+
+  return (
+    <View style={[styles.row, { justifyContent: mine ? "flex-end" : "flex-start" }]}>
+      <Pressable
+        onLongPress={() => onHold(m.id)}
+        delayLongPress={350}
+        style={[
+          styles.bubble,
+          { backgroundColor: palette.backgroundColor, borderColor: palette.borderColor },
+        ]}
+      >
+        {!mine && <Text style={[styles.sender, { color: palette.color }]}>{m.from}</Text>}
+
+        {replied && (
+          <View style={styles.replyPreview}>
+            <Text style={[styles.replyName, { color: palette.color }]}>{replied.from}</Text>
+            <Text numberOfLines={1} style={[styles.replyText, { color: palette.color }]}>
+              {isMedia(replied) ? `📎 ${replied.filename || replied.content}` : replied.content}
+            </Text>
+          </View>
+        )}
+
+        {renderBody()}
+
+        <Text style={[styles.meta, { color: palette.color }]}>
+          {secure ? "🔒 " : ""}
+          {formatTime(m.created_at)}
+          {countdown ? `  ·  🔥 ${countdown}` : ""}
+          {mine ? `  ·  ${STATUS_LABEL[m.status] || STATUS_LABEL.sent}` : ""}
+        </Text>
+
+        {held && (
+          <View style={styles.actions}>
+            <Pressable
+              onPress={() => {
+                onReply(m);
+                onUnhold();
+              }}
+            >
+              <Text style={[styles.action, { color: palette.color }]}>↩ Reply</Text>
+            </Pressable>
+            {!isMedia(m) && !m.decryptError && (
+              <Pressable
+                onPress={() => {
+                  Clipboard.setStringAsync(m.content || "");
+                  onUnhold();
+                }}
+              >
+                <Text style={[styles.action, { color: palette.color }]}>📋 Copy</Text>
+              </Pressable>
+            )}
+            {onDelete && (
+              <Pressable
+                onPress={() => {
+                  onDelete(m, "me");
+                  onUnhold();
+                }}
+              >
+                <Text style={[styles.action, { color: palette.color }]}>🗑 For me</Text>
+              </Pressable>
+            )}
+            {onDelete && canDeleteEveryone && (
+              <Pressable
+                onPress={() => {
+                  onDelete(m, "everyone");
+                  onUnhold();
+                }}
+              >
+                <Text style={[styles.action, { color: palette.color }]}>🗑 For everyone</Text>
+              </Pressable>
+            )}
+            <Pressable onPress={onUnhold}>
+              <Text style={[styles.action, { color: palette.color }]}>✕</Text>
+            </Pressable>
+          </View>
+        )}
+      </Pressable>
+    </View>
+  );
+});
 
 export default function MessageList({
   messages,
@@ -61,29 +269,30 @@ export default function MessageList({
 
   const [heldId, setHeldId] = useState(null);
   const [preview, setPreview] = useState(null);
-
-  // Ticks the self-destruct countdowns and hides a message the moment its
-  // timer elapses, ahead of the server's sweep broadcast.
-  const [now, setNow] = useState(() => Date.now());
-  const hasTimers = messages.some((m) => m.expires_at);
-  useEffect(() => {
-    if (!hasTimers) return undefined;
-    const t = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(t);
-  }, [hasTimers]);
+  // Messages whose own countdown (see Bubble/useCountdown) has reached zero.
+  // Kept separate from server state — a "deleted" broadcast prunes `messages`
+  // itself — so this is just belt-and-braces for the gap before it arrives.
+  const [expiredIds, setExpiredIds] = useState(() => new Set());
 
   const visible = useMemo(
-    () =>
-      messages.filter(
-        (m) => !(m.expires_at && new Date(m.expires_at).getTime() <= now)
-      ),
-    [messages, now]
+    () => (expiredIds.size === 0 ? messages : messages.filter((m) => !expiredIds.has(m.id))),
+    [messages, expiredIds]
   );
 
-  const byId = useMemo(
-    () => new Map(messages.map((m) => [m.id, m])),
-    [messages]
-  );
+  // Read via a ref rather than passed as a prop: `byId` gets a new identity on
+  // every incoming message, and threading it into Bubble's own props would
+  // force every row to re-render each time, which is exactly the per-message
+  // full-list churn this file otherwise avoids.
+  const byIdRef = useRef(new Map());
+  byIdRef.current = useMemo(() => new Map(messages.map((m) => [m.id, m])), [messages]);
+  const getReplied = useCallback((id) => byIdRef.current.get(id) || null, []);
+
+  const onExpire = useCallback((id) => {
+    setExpiredIds((prev) => (prev.has(id) ? prev : new Set(prev).add(id)));
+  }, []);
+  const onHold = useCallback((id) => setHeldId(id), []);
+  const onUnhold = useCallback(() => setHeldId(null), []);
+  const onPreview = useCallback((m) => setPreview(m), []);
 
   function onScroll(e) {
     const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
@@ -97,171 +306,26 @@ export default function MessageList({
     }
   }
 
-  function outgoingBubble(status) {
-    if (status === "seen") {
-      return { backgroundColor: theme.success, color: "#fff", borderColor: "transparent" };
-    }
-    if (status === "delivered") {
-      return {
-        backgroundColor: theme.primary,
-        color: theme.primaryContrast,
-        borderColor: "transparent",
-      };
-    }
-    return {
-      backgroundColor: theme.bubbleSent,
-      color: theme.bubbleSentText,
-      borderColor: theme.bubbleSentBorder,
-    };
-  }
-
-  function renderBody(message, textColor) {
-    if (message.decryptError === "locked") {
-      return (
-        <Text style={[styles.systemNote, { color: textColor }]}>
-          🔒 Unlock secure chat to read this message
-        </Text>
-      );
-    }
-    if (message.decryptError === "failed") {
-      return (
-        <Text style={[styles.systemNote, { color: textColor }]}>
-          🔒 Cannot decrypt — this message was sent to a different key
-        </Text>
-      );
-    }
-
-    if (isMedia(message)) {
-      const label = message.filename || message.content || "attachment";
-      if (isImage(message)) {
-        return (
-          <Pressable onPress={() => setPreview(message)}>
-            <Text style={[styles.mediaIcon]}>🖼️</Text>
-            <Text style={[styles.mediaLabel, { color: textColor }]}>{label}</Text>
-            <Text style={[styles.mediaHint, { color: textColor }]}>Tap to view</Text>
-          </Pressable>
-        );
-      }
-      return (
-        <Pressable onPress={() => setPreview(message)}>
-          <Text style={[styles.text, { color: textColor }]}>📎 {label}</Text>
-        </Pressable>
-      );
-    }
-
-    return (
-      <Text style={[styles.text, { color: textColor }]}>{message.content}</Text>
-    );
-  }
-
-  function renderItem({ item: m }) {
-    if (isSystem(m)) {
-      return (
-        <View style={styles.systemRow}>
-          <Text style={[styles.systemPill, { color: theme.subtext, backgroundColor: theme.bubbleIn }]}>
-            {m.content}
-          </Text>
-        </View>
-      );
-    }
-
-    const mine = m.from === me;
-    const replied = m.reply_to ? byId.get(m.reply_to) : null;
-    const canDeleteEveryone = mine || secure;
-    const countdown = m.expires_at ? countdownLabel(m.expires_at, now) : null;
-    const palette = mine
-      ? outgoingBubble(m.status)
-      : {
-          backgroundColor: theme.bubbleIn,
-          color: theme.bubbleInText,
-          borderColor: "transparent",
-        };
-
-    return (
-      <View style={[styles.row, { justifyContent: mine ? "flex-end" : "flex-start" }]}>
-        <Pressable
-          onLongPress={() => setHeldId(m.id)}
-          delayLongPress={350}
-          style={[
-            styles.bubble,
-            { backgroundColor: palette.backgroundColor, borderColor: palette.borderColor },
-          ]}
-        >
-          {!mine && (
-            <Text style={[styles.sender, { color: palette.color }]}>{m.from}</Text>
-          )}
-
-          {replied && (
-            <View style={styles.replyPreview}>
-              <Text style={[styles.replyName, { color: palette.color }]}>
-                {replied.from}
-              </Text>
-              <Text numberOfLines={1} style={[styles.replyText, { color: palette.color }]}>
-                {isMedia(replied)
-                  ? `📎 ${replied.filename || replied.content}`
-                  : replied.content}
-              </Text>
-            </View>
-          )}
-
-          {renderBody(m, palette.color)}
-
-          <Text style={[styles.meta, { color: palette.color }]}>
-            {secure ? "🔒 " : ""}
-            {formatTime(m.created_at)}
-            {countdown ? `  ·  🔥 ${countdown}` : ""}
-            {mine ? `  ·  ${STATUS_LABEL[m.status] || STATUS_LABEL.sent}` : ""}
-          </Text>
-
-          {heldId === m.id && (
-            <View style={styles.actions}>
-              <Pressable
-                onPress={() => {
-                  onReply(m);
-                  setHeldId(null);
-                }}
-              >
-                <Text style={[styles.action, { color: palette.color }]}>↩ Reply</Text>
-              </Pressable>
-              {!isMedia(m) && !m.decryptError && (
-                <Pressable
-                  onPress={() => {
-                    Clipboard.setStringAsync(m.content || "");
-                    setHeldId(null);
-                  }}
-                >
-                  <Text style={[styles.action, { color: palette.color }]}>📋 Copy</Text>
-                </Pressable>
-              )}
-              {onDelete && (
-                <Pressable
-                  onPress={() => {
-                    onDelete(m, "me");
-                    setHeldId(null);
-                  }}
-                >
-                  <Text style={[styles.action, { color: palette.color }]}>🗑 For me</Text>
-                </Pressable>
-              )}
-              {onDelete && canDeleteEveryone && (
-                <Pressable
-                  onPress={() => {
-                    onDelete(m, "everyone");
-                    setHeldId(null);
-                  }}
-                >
-                  <Text style={[styles.action, { color: palette.color }]}>🗑 For everyone</Text>
-                </Pressable>
-              )}
-              <Pressable onPress={() => setHeldId(null)}>
-                <Text style={[styles.action, { color: palette.color }]}>✕</Text>
-              </Pressable>
-            </View>
-          )}
-        </Pressable>
-      </View>
-    );
-  }
+  const renderItem = useCallback(
+    ({ item: m }) => (
+      <Bubble
+        message={m}
+        mine={m.from === me}
+        me={me}
+        secure={secure}
+        held={heldId === m.id}
+        theme={theme}
+        getReplied={getReplied}
+        onHold={onHold}
+        onUnhold={onUnhold}
+        onReply={onReply}
+        onDelete={onDelete}
+        onPreview={onPreview}
+        onExpire={onExpire}
+      />
+    ),
+    [me, secure, heldId, theme, getReplied, onHold, onUnhold, onReply, onDelete, onPreview, onExpire]
+  );
 
   return (
     <>
@@ -275,6 +339,15 @@ export default function MessageList({
         scrollEventThrottle={64}
         onContentSizeChange={maybeScrollToEnd}
         contentContainerStyle={styles.list}
+        // Tuned for a chat feed on mid-range Android: a smaller window and
+        // batch than the defaults (21 screens, 10/batch with no cap) keep the
+        // JS thread from doing rendering work far outside the viewport, which
+        // is where scroll jank on lower-end devices actually comes from.
+        windowSize={7}
+        maxToRenderPerBatch={8}
+        updateCellsBatchingPeriod={30}
+        initialNumToRender={14}
+        removeClippedSubviews
         ListEmptyComponent={
           <Text style={[styles.empty, { color: theme.subtext }]}>
             {secure ? "🔒 No messages yet in this secure chat" : "No messages yet"}

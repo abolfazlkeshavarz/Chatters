@@ -170,13 +170,16 @@ export default function ChatScreen({ route, navigation }) {
     return ok;
   }
 
-  async function handleDelete(message, scope) {
-    try {
-      await deleteMessage(message.id, scope);
-    } catch (err) {
-      setError(err.message || "Could not delete the message");
-    }
-  }
+  const handleDelete = useCallback(
+    async (message, scope) => {
+      try {
+        await deleteMessage(message.id, scope);
+      } catch (err) {
+        setError(err.message || "Could not delete the message");
+      }
+    },
+    [setError]
+  );
 
   function handleAttach() {
     Alert.alert("Attach", undefined, [
