@@ -61,7 +61,6 @@ class ChatScreenState extends State<ChatScreen> {
     _chatId = (widget.chat?['id'] as String?) ?? widget.chatId!;
     Notifications.instance.activeChatId = _chatId;
     _ctl = ChatController(_chatId)..addListener(_onCtl);
-    _text.addListener(() => setState(() {}));
 
     if (_chat == null) {
       _refreshChat();
@@ -502,7 +501,6 @@ class ChatScreenState extends State<ChatScreen> {
 
   Widget _composer(bool blocked) {
     final p = context.p;
-    final hasText = _text.text.trim().isNotEmpty;
     final g = _secure ? p.secureGradient : p.gradient;
     return Padding(
       padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
@@ -578,31 +576,42 @@ class ChatScreenState extends State<ChatScreen> {
                 ),
               ),
             ),
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 220),
-              transitionBuilder: (c, a) => ScaleTransition(scale: a, child: c),
-              child: hasText
-                  ? Pressable(
-                      key: const ValueKey('send'),
-                      onTap: blocked ? null : _send,
-                      child: Container(
-                        width: 44,
-                        height: 44,
-                        decoration: BoxDecoration(
-                          gradient: g,
-                          shape: BoxShape.circle,
-                          boxShadow: [BoxShadow(color: p.primary.withValues(alpha: 0.4), blurRadius: 12, offset: const Offset(0, 4))],
-                        ),
-                        child: const Icon(Icons.arrow_upward_rounded, color: Colors.white),
-                      ),
-                    )
-                  : _secure
-                      ? const SizedBox(key: ValueKey('none'), width: 44, height: 44)
-                      : IconButton(
-                          key: const ValueKey('camera'),
-                          icon: Icon(Icons.photo_camera_rounded, color: p.subtext),
-                          onPressed: blocked || _uploading ? null : () => _attach('camera'),
-                        ),
+            // Scoped to just this icon: rebuilding the whole screen on every
+            // keystroke (this used to be a page-wide setState in the
+            // TextEditingController's listener) is what made typing feel
+            // heavy — the app bar, wallpaper and message list have no reason
+            // to redraw on every character.
+            ListenableBuilder(
+              listenable: _text,
+              builder: (context, _) {
+                final hasText = _text.text.trim().isNotEmpty;
+                return AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 220),
+                  transitionBuilder: (c, a) => ScaleTransition(scale: a, child: c),
+                  child: hasText
+                      ? Pressable(
+                          key: const ValueKey('send'),
+                          onTap: blocked ? null : _send,
+                          child: Container(
+                            width: 44,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              gradient: g,
+                              shape: BoxShape.circle,
+                              boxShadow: [BoxShadow(color: p.primary.withValues(alpha: 0.4), blurRadius: 12, offset: const Offset(0, 4))],
+                            ),
+                            child: const Icon(Icons.arrow_upward_rounded, color: Colors.white),
+                          ),
+                        )
+                      : _secure
+                          ? const SizedBox(key: ValueKey('none'), width: 44, height: 44)
+                          : IconButton(
+                              key: const ValueKey('camera'),
+                              icon: Icon(Icons.photo_camera_rounded, color: p.subtext),
+                              onPressed: blocked || _uploading ? null : () => _attach('camera'),
+                            ),
+                );
+              },
             ),
           ]),
         ]),
